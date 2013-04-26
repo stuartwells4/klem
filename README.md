@@ -9,17 +9,17 @@ The Linux kernel since version 2.6.32 has a SoftMAC 802.11 framework known as ma
 
 The KLEM driver wraps each wireless 802.11 frame with the following specialized raw Ethernet packet format:o
 
-     Length	Description		Value
+     Length     Description             Value
 
-     6 bytes	Destination MAC		0xffffffffffff (Broadcast)
-     6 bytes	Source MAC		MAC of virtual wireless device
-     2 bytes	Protocol		0xdead
-     4 bytes	Header			“klem”
-     4 bytes	Version			1	
-     4 bytes	Band			Band used to “transmit” packet
-     4 bytes	Frequency		Frequency used to “transmit” packet
-     4 bytes	Power			Power level used to “transmit” packet.
-     4 bytes	KLEM ID			value between 0-255 
+     6 bytes    Destination MAC         0xffffffffffff (Broadcast)
+     6 bytes    Source MAC              MAC of virtual wireless device
+     2 bytes    Protocol                0xdead
+     4 bytes    Header                  “klem”
+     4 bytes    Version                 1	
+     4 bytes    Band                    Band used to “transmit” packet
+     4 bytes    Frequency               Frequency used to “transmit” packet
+     4 bytes    Power                   Power level used to “transmit” packet.
+     4 bytes    KLEM ID                 value between 0-255 
 
 Usage
 -----
