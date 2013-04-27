@@ -50,10 +50,11 @@ Alternative network deployments can be accomplished by setting the numerical KLE
      #insmod klem.ko
      #echo “device = eth0” > /proc/klem
 
-Each mesh can be assigned a specific ID
+     Each mesh can be assigned a specific ID
      #echo “id = 10” > /proc/klem
 
-Each mesh can be specified to filter certain ID’s from being received, thus allowing specialized topologies to be represented.
+     Each mesh can be specified to filter certain ID’s from being received,
+     thus allowing specialized virtual topologies to be represented.
      #echo “filter = 30” > /proc/klem
 
      #echo “command = start” > /proc/klem
