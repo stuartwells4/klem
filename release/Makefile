@@ -15,13 +15,10 @@ SRC := ../src/driver/
 EXTRA_CFLAGS=-I$(PWD)/$(SRC) -I$(PWD)
 #NOSTDINC_FLAGS := -I$(PWD)
 
-ifneq ($(KERNELRELEASE),)
-	obj-m := klem.o
-	klem-objs := $(SRC)/klemModule.o $(SRC)/klemProc.o $(SRC)/klemData.o $(SRC)/klemNet.o $(SRC)/klemCtrl.o $(SRC)/klem80211.o
-else
-	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
-	PWD := $(shell pwd)
-endif
+obj-m := klem.o
+klem-objs := $(SRC)/klemModule.o $(SRC)/klemProc.o $(SRC)/klemData.o $(SRC)/klemNet.o $(SRC)/klemCtrl.o $(SRC)/klem80211.o
+KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+PWD := $(shell pwd)
 
 default: klem
 
