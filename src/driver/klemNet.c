@@ -65,7 +65,7 @@ typedef struct raw_socket_def {
   union {
     char str [4];
     u32 ui;
-  } hdr; 
+  } hdr;
   u32 uVersion;
 } raw_socket;
 
@@ -77,14 +77,14 @@ static void privRecvReady(struct sock *pSocket, int iBytes)
     if (NULL != pRaw->recvReady) {
       pRaw->recvReady(pSocket, iBytes);
     }
-    
+
     /* Wake up */
     wake_up_all(&pRaw->recvQueue);
   }
 }
 
-/* 
- * Create a raw connection on a network device 
+/*
+ * Create a raw connection on a network device
  */
 static void *privCreateRaw(char *pDevLabel)
 {
@@ -94,80 +94,80 @@ static void *privCreateRaw(char *pDevLabel)
 
   if (NULL != pDevLabel) {
     pRaw = kmalloc(sizeof(raw_socket), GFP_ATOMIC);
-    
+
     if (NULL != pRaw) {
       pRaw->pSocket = NULL;
       pRaw->bConnected = false;
-      
+
       /* Create our socket */
       rvalue = sock_create_kern(PF_PACKET,
-				SOCK_RAW,
-				htons(ETH_P_ALL),
-				&pRaw->pSocket); 
+                                SOCK_RAW,
+                                htons(ETH_P_ALL),
+                                &pRaw->pSocket);
       if ((rvalue >= 0) && (NULL != pRaw->pSocket)) {
-	/* Need to reference our data structure */
-	pRaw->pSocket->sk->sk_user_data = (void *)pRaw;
-	
-	/* Set 4 second timeout. Easy calculation. */
-	pRaw->pSocket->sk->sk_sndtimeo = HZ << 2;
-	pRaw->pSocket->sk->sk_rcvtimeo = HZ << 2;
-	
-	/* Yea, we can reuse this socket.  Needed? */
-	pRaw->pSocket->sk->sk_reuse = 1;
-	
-	/* atomic allocation */
-	pRaw->pSocket->sk->sk_allocation = GFP_ATOMIC;
-	
-	/* Create recv queue, before setting callbacks */
-	init_waitqueue_head(&pRaw->recvQueue);	
-	
-	/* We need a semaphore. */
-	sema_init(&pRaw->sendWait, 1);
-	
-	/* Halt any callback */
-	write_lock_bh(&pRaw->pSocket->sk->sk_callback_lock);
-	
-	/* Perhaps not needed, but remember our orignal data ready function. */
-	pRaw->recvReady = pRaw->pSocket->sk->sk_data_ready;
-	
-	/* Our callback recv function. */
-	pRaw->pSocket->sk->sk_data_ready = privRecvReady;
-	
-	/* Copy the header information */
-	strncpy(pRaw->hdr.str, KLEM_NAME, 4);
-	
-	/* Set the protocol type */
-	pRaw->uProtocol = KLEM_PROTOCOL;
-	
-	/* Set the protcol version */
-	pRaw->uVersion = KLEM_INT_VERSION;
-	
-	/* Resume any callbacks */
-	write_unlock_bh(&pRaw->pSocket->sk->sk_callback_lock);
-	
-	/* Find the device were will transmit the raw packet. */
-	pDev = __dev_get_by_name(pRaw->pSocket->sk->__sk_common.skc_net,
-				 pDevLabel);
-	if (NULL != pDev) {
-	  memcpy(pRaw->pDevMac, (char *)pDev->perm_addr, ETH_ALEN);
-	} else {
-	  /* We failed, broadcasting it might work, lets try that. */
-	  KLEM_MSG("Didn't find network device, we will broadcast it");
-	  memset(pRaw->pDevMac, 0xff, ETH_ALEN);
-	}
+        /* Need to reference our data structure */
+        pRaw->pSocket->sk->sk_user_data = (void *)pRaw;
 
-	/* Default the lemu to broadcast. */
-	memset(pRaw->pLemuMac, 0xff, ETH_ALEN);
-	
-	/* Set the send/recv threads to null */
-	pRaw->pRecvThread = NULL;
-	
-	/* Lets say we have a conenction now. */
-	pRaw->bConnected = true;
+        /* Set 4 second timeout. Easy calculation. */
+        pRaw->pSocket->sk->sk_sndtimeo = HZ << 2;
+        pRaw->pSocket->sk->sk_rcvtimeo = HZ << 2;
+
+        /* Yea, we can reuse this socket.  Needed? */
+        pRaw->pSocket->sk->sk_reuse = 1;
+
+        /* atomic allocation */
+        pRaw->pSocket->sk->sk_allocation = GFP_ATOMIC;
+
+        /* Create recv queue, before setting callbacks */
+        init_waitqueue_head(&pRaw->recvQueue);
+
+        /* We need a semaphore. */
+        sema_init(&pRaw->sendWait, 1);
+
+        /* Halt any callback */
+        write_lock_bh(&pRaw->pSocket->sk->sk_callback_lock);
+
+        /* Perhaps not needed, but remember our orignal data ready function. */
+        pRaw->recvReady = pRaw->pSocket->sk->sk_data_ready;
+
+        /* Our callback recv function. */
+        pRaw->pSocket->sk->sk_data_ready = privRecvReady;
+
+        /* Copy the header information */
+        strncpy(pRaw->hdr.str, KLEM_NAME, 4);
+
+        /* Set the protocol type */
+        pRaw->uProtocol = KLEM_PROTOCOL;
+
+        /* Set the protcol version */
+        pRaw->uVersion = KLEM_INT_VERSION;
+
+        /* Resume any callbacks */
+        write_unlock_bh(&pRaw->pSocket->sk->sk_callback_lock);
+
+        /* Find the device were will transmit the raw packet. */
+        pDev = __dev_get_by_name(pRaw->pSocket->sk->__sk_common.skc_net,
+                                 pDevLabel);
+        if (NULL != pDev) {
+          memcpy(pRaw->pDevMac, (char *)pDev->perm_addr, ETH_ALEN);
+        } else {
+          /* We failed, broadcasting it might work, lets try that. */
+          KLEM_MSG("Didn't find network device, we will broadcast it");
+          memset(pRaw->pDevMac, 0xff, ETH_ALEN);
+        }
+
+        /* Default the lemu to broadcast. */
+        memset(pRaw->pLemuMac, 0xff, ETH_ALEN);
+
+        /* Set the send/recv threads to null */
+        pRaw->pRecvThread = NULL;
+
+        /* Lets say we have a conenction now. */
+        pRaw->bConnected = true;
       } else {
-	KLEM_LOG("Error creating socket %s %d\n", pDevLabel, rvalue); 
-	kfree(pRaw);
-	pRaw = NULL;
+        KLEM_LOG("Error creating socket %s %d\n", pDevLabel, rvalue);
+        kfree(pRaw);
+        pRaw = NULL;
       }
     }
   }
@@ -195,10 +195,10 @@ static void privDestroyRaw(void *pPtr)
 
       /* Perhaps not needed, set to orignal callback */
       pRaw->pSocket->sk->sk_data_ready = pRaw->recvReady;
-      
+
       /* Resume any callbacks */
       write_unlock_bh(&pRaw->pSocket->sk->sk_callback_lock);
-      
+
       /* Release that socket into the wild. */
       sock_release(pRaw->pSocket);
       pRaw->pSocket = NULL;
@@ -208,16 +208,16 @@ static void privDestroyRaw(void *pPtr)
   }
 }
 
-/* 
+/*
  * Fairly generic implementation for sending a packet
  * should work for tcp, udp and raw connections.
  */
 static unsigned int privSocketSend(void *pPtr,
-				   struct iovec *pVec,
-				   unsigned int uVecLength,
-				   unsigned int uDataLength,
-				   void *pName,
-				   unsigned int uNameLength)
+                                   struct iovec *pVec,
+                                   unsigned int uVecLength,
+                                   unsigned int uDataLength,
+                                   void *pName,
+                                   unsigned int uNameLength)
 {
   raw_socket *pRaw = (raw_socket *)pPtr;
   unsigned long ulFlags;
@@ -238,15 +238,15 @@ static unsigned int privSocketSend(void *pPtr,
     sigdelsetmask(&current->blocked, sigmask(SIGKILL));
     recalc_sigpending();
     spin_unlock_irqrestore(&current->sighand->siglock, ulFlags);
-    
+
     mHdr.msg_control = NULL;
     mHdr.msg_controllen = 0;
     mHdr.msg_flags = MSG_NOSIGNAL | MSG_DONTWAIT;
-    
+
     /* sockaddr stuff */
     mHdr.msg_name = pName;
     mHdr.msg_namelen = uNameLength;
- 
+
     while ((true == pRaw->bConnected) && (uSendLength > 0)) {
       mHdr.msg_iov = &pVec [uVecCurrent];
       mHdr.msg_iovlen = uVecLength - uVecCurrent;
@@ -254,71 +254,71 @@ static unsigned int privSocketSend(void *pPtr,
       iRetries = 0;
       iError = 0;
       while ((iRetries++ < MAX_RETRIES) && (true == pRaw->bConnected)) {
-	/* Finally the kernel does it magic, */
-	iError = sock_sendmsg(pRaw->pSocket, 
-			      &mHdr,
-			      uSendLength);
-	
-	if (signal_pending(current)) {
-	  /* dequeue a sigkill and quiet. */
-	  spin_lock_irqsave(&current->sighand->siglock, ulFlags);
-	  dequeue_signal(current, &current->blocked, &sigInfo);
-	  spin_unlock_irqrestore(&current->sighand->siglock, ulFlags);
-	  break;
-	}
+        /* Finally the kernel does it magic, */
+        iError = sock_sendmsg(pRaw->pSocket,
+                              &mHdr,
+                              uSendLength);
 
-	switch(iError) 
-	  {
-	  case -EAGAIN:
-	  case -ENOSPC:
-	    /* For these errors, les sleep then try again. */
-	    msleep_interruptible(32 << (iRetries % 4));
-	    break;
-	  case 0:
-	    /* Generic TCP has issues, copied from cifs */
-	    KLEM_MSG("Recv TCP size issue\n");
-	    msleep_interruptible(500);
-	    break;
-	  default:
-	    /* must have gotten something more interesting, don't try again */
-	    iRetries = MAX_RETRIES;
-	    break;
-	}
+        if (signal_pending(current)) {
+          /* dequeue a sigkill and quiet. */
+          spin_lock_irqsave(&current->sighand->siglock, ulFlags);
+          dequeue_signal(current, &current->blocked, &sigInfo);
+          spin_unlock_irqrestore(&current->sighand->siglock, ulFlags);
+          break;
+        }
+
+        switch(iError)
+          {
+          case -EAGAIN:
+          case -ENOSPC:
+            /* For these errors, les sleep then try again. */
+            msleep_interruptible(32 << (iRetries % 4));
+            break;
+          case 0:
+            /* Generic TCP has issues, copied from cifs */
+            KLEM_MSG("Recv TCP size issue\n");
+            msleep_interruptible(500);
+            break;
+          default:
+            /* must have gotten something more interesting, don't try again */
+            iRetries = MAX_RETRIES;
+            break;
+        }
       }
 
       /* Did we send any data? consider simplification*/
       if (iError > 0) {
-	if (iError >= uSendLength) {
-	  /* All sent, full write */
-	  uSendLength -= iError;
-	  rvalue += iError;
-	} else {
-	  /* fix that partial write */
-	  while ((uVecCurrent < uVecLength) && (iError > 0)) {
-	    if (iError >= pVec [uVecCurrent].iov_len) {
-	      /* We have consumed an entire iov */
-	      uSendLength -= pVec [uVecCurrent].iov_len;
-	      iError -= pVec [uVecCurrent].iov_len;
-	      rvalue += pVec [uVecCurrent].iov_len;
-	      uVecCurrent += 1;
-	    } else {
-	      /* Partial iov consumed case */
-	      pVec [uVecCurrent].iov_len -= iError;
-	      pVec [uVecCurrent].iov_base += iError;
-	      uSendLength -= iError;
-	      rvalue += iError;
-	      iError = 0;
-	    }
-	  }
-	}
-      }	else {
-	/* No data was sent, this is an error. */
-	KLEM_LOG("send error %d\n", iError);
-	rvalue = 0;
-	uSendLength = 0;
-      } 
+        if (iError >= uSendLength) {
+          /* All sent, full write */
+          uSendLength -= iError;
+          rvalue += iError;
+        } else {
+          /* fix that partial write */
+          while ((uVecCurrent < uVecLength) && (iError > 0)) {
+            if (iError >= pVec [uVecCurrent].iov_len) {
+              /* We have consumed an entire iov */
+              uSendLength -= pVec [uVecCurrent].iov_len;
+              iError -= pVec [uVecCurrent].iov_len;
+              rvalue += pVec [uVecCurrent].iov_len;
+              uVecCurrent += 1;
+            } else {
+              /* Partial iov consumed case */
+              pVec [uVecCurrent].iov_len -= iError;
+              pVec [uVecCurrent].iov_base += iError;
+              uSendLength -= iError;
+              rvalue += iError;
+              iError = 0;
+            }
+          }
+        }
+      }        else {
+        /* No data was sent, this is an error. */
+        KLEM_LOG("send error %d\n", iError);
+        rvalue = 0;
+        uSendLength = 0;
+      }
     }
-    
+
     /* no more sigkill. */
     spin_lock_irqsave(&current->sighand->siglock, ulFlags);
     current->blocked = sigSet;
@@ -327,9 +327,9 @@ static unsigned int privSocketSend(void *pPtr,
   }
 
   return rvalue;
-}	
+}
 
-/* 
+/*
  * Poll to see if anything is ready to recv.
 */
 static int privRecvPoll(void *pPtr)
@@ -350,7 +350,7 @@ static int privRecvPoll(void *pPtr)
 }
 
 /*
- *  Wait until we have a packet. 
+ *  Wait until we have a packet.
 */
 static void privRecvWait(void *pPtr)
 {
@@ -360,7 +360,7 @@ static void privRecvWait(void *pPtr)
 
   if (NULL != pRaw)  {
     wait_event_interruptible(pRaw->recvQueue,
-			     ((rvalue = privRecvPoll(pPtr)) > 0));
+                             ((rvalue = privRecvPoll(pPtr)) > 0));
   }
 }
 
@@ -370,11 +370,11 @@ static int privateRecvRawThread(void *pPtr)
   struct sk_buff *pSkb = NULL;
   KLEM_RAW_HEADER *pHdr = NULL;
   unsigned int uHdrLen = sizeof(KLEM_RAW_HEADER);
-  
+
   set_user_nice(current, -20);
 
   while ((false == kthread_should_stop()) &&
-	 (false != pRaw->bConnected)) {
+         (false != pRaw->bConnected)) {
     /* Wait until we have a packet */
     privRecvWait(pRaw);
 
@@ -383,42 +383,42 @@ static int privateRecvRawThread(void *pPtr)
       pSkb = skb_dequeue(&pRaw->pSocket->sk->sk_receive_queue);
 
       if (NULL != pSkb) {
-	pHdr = (KLEM_RAW_HEADER *)pSkb->data;
-	
-	if (LEMU == pRaw->pData->eMode) {
-	  if (pSkb->len >= uHdrLen) {
-	    /* Lets examine the incomming header */
-	    pHdr = (KLEM_RAW_HEADER *)pSkb->data;
-	    
-	    if (pRaw->uProtocol == ntohs(pHdr->uProtocol)) {
-	      if (pRaw->hdr.ui == ntohl(pHdr->uHeader)) {
-		if (pRaw->uVersion == ntohl(pHdr->uVersion)) {
-		  
-		  /* remove the header */
-		  skb_pull(pSkb, uHdrLen);
-		  
-		  /* call the klem80211 side, to recv packet. */
-		  klem80211Recv(pRaw->pData, pSkb);
-		  
-		  /* I know nothing */
-		  pSkb = NULL;	  
-		}
-	      }
-	    }
-	  }
-	} else {
-	  /* call the klem80211 side, to recv packet. */
-	  klem80211Recv(pRaw->pData, pSkb);
-	  
-	  /* I know nothing */
-	  pSkb = NULL;	  
-	}
-	
-	/* IF were are here, free that buffer, its not ours. */
-	if (NULL != pSkb) {
-	  dev_kfree_skb(pSkb);
-	  pSkb = NULL;
-	}
+        pHdr = (KLEM_RAW_HEADER *)pSkb->data;
+
+        if (LEMU == pRaw->pData->eMode) {
+          if (pSkb->len >= uHdrLen) {
+            /* Lets examine the incomming header */
+            pHdr = (KLEM_RAW_HEADER *)pSkb->data;
+
+            if (pRaw->uProtocol == ntohs(pHdr->uProtocol)) {
+              if (pRaw->hdr.ui == ntohl(pHdr->uHeader)) {
+                if (pRaw->uVersion == ntohl(pHdr->uVersion)) {
+
+                  /* remove the header */
+                  skb_pull(pSkb, uHdrLen);
+
+                  /* call the klem80211 side, to recv packet. */
+                  klem80211Recv(pRaw->pData, pSkb);
+
+                  /* I know nothing */
+                  pSkb = NULL;
+                }
+              }
+            }
+          }
+        } else {
+          /* call the klem80211 side, to recv packet. */
+          klem80211Recv(pRaw->pData, pSkb);
+
+          /* I know nothing */
+          pSkb = NULL;
+        }
+
+        /* IF were are here, free that buffer, its not ours. */
+        if (NULL != pSkb) {
+          dev_kfree_skb(pSkb);
+          pSkb = NULL;
+        }
       }
     }
   }
@@ -440,7 +440,7 @@ void *klemNetConnect(void *pPtr, char *pDevLabel)
 {
   KLEMData *pData = (KLEMData *)pPtr;
   raw_socket *pRaw = NULL;
-  
+
   KLEM_LOG("Create Raw Socket %s\n", pDevLabel);
   pRaw = privCreateRaw(pDevLabel);
 
@@ -448,8 +448,8 @@ void *klemNetConnect(void *pPtr, char *pDevLabel)
     sprintf(pRaw->pRecvName, "klem-%s-recv", pDevLabel);
     pRaw->pData = pData;
     pRaw->pRecvThread = (void *)kthread_run(privateRecvRawThread,
-					    (void *)pRaw,
-					    pRaw->pRecvName);
+                                            (void *)pRaw,
+                                            pRaw->pRecvName);
   }
 
   return (void *)pRaw;
@@ -462,7 +462,7 @@ void klemNetDisconnect(void *pPtr)
   if (NULL != pRaw) {
     /* Lets make the socket inactive. */
     pRaw->bConnected = false;
-    
+
     /* Wake everyone up */
     wake_up_all(&pRaw->recvQueue);
     if (NULL != pRaw->pRecvThread) {
@@ -477,9 +477,9 @@ void klemNetDisconnect(void *pPtr)
 /*
  * Send the contents of an sk_buff raw on a network device.
  */
-unsigned int klemTransmit(void *pPtr, 
-			  struct sk_buff *pSkb,
-			  char *pHdr, unsigned int uHdrSize)
+unsigned int klemTransmit(void *pPtr,
+                          struct sk_buff *pSkb,
+                          char *pHdr, unsigned int uHdrSize)
 {
   raw_socket *pRaw = (raw_socket *)pPtr;
   KLEM_RAW_HEADER khdr;
@@ -494,33 +494,33 @@ unsigned int klemTransmit(void *pPtr,
     if (true == pRaw->bConnected) {
       /* Take semaphore, but allow ourselves to be blocked. */
       if (down_interruptible(&pRaw->sendWait)) {
-	/* We got a bad signal, don't send anything. */
-	return 0;
+        /* We got a bad signal, don't send anything. */
+        return 0;
       }
 
       if (LEMU == pRaw->pData->eMode) {
-	/* Let everyone know our mac. */
-	memcpy(khdr.pSrcMac, pRaw->pDevMac, ETH_ALEN);
-	
-	/* Broadcast the packet */
-	memcpy(khdr.pDstMac, pRaw->pLemuMac, ETH_ALEN);
-      
-	/* Setup the raw ethernet header */
-	khdr.uProtocol = htons(pRaw->uProtocol);
-	khdr.uHeader = htonl(pRaw->hdr.ui);
-	khdr.uVersion = htonl(pRaw->uVersion);
-            
-	/* Point to the ethernet header + klem datagram stuff */
-	sioVec [uvloc].iov_base = (char *)&khdr;
-	sioVec [uvloc].iov_len = sizeof(KLEM_RAW_HEADER);      
-	uvsize += sioVec [uvloc].iov_len;
-	uvloc++;
-	if ((NULL != pHdr) && (0 != uHdrSize)) {
-	  sioVec [uvloc].iov_base = (char *)pHdr;
-	  sioVec [uvloc].iov_len = uHdrSize;
-	  uvsize += sioVec [uvloc].iov_len;
-	  uvloc++;
-	}
+        /* Let everyone know our mac. */
+        memcpy(khdr.pSrcMac, pRaw->pDevMac, ETH_ALEN);
+
+        /* Broadcast the packet */
+        memcpy(khdr.pDstMac, pRaw->pLemuMac, ETH_ALEN);
+
+        /* Setup the raw ethernet header */
+        khdr.uProtocol = htons(pRaw->uProtocol);
+        khdr.uHeader = htonl(pRaw->hdr.ui);
+        khdr.uVersion = htonl(pRaw->uVersion);
+
+        /* Point to the ethernet header + klem datagram stuff */
+        sioVec [uvloc].iov_base = (char *)&khdr;
+        sioVec [uvloc].iov_len = sizeof(KLEM_RAW_HEADER);
+        uvsize += sioVec [uvloc].iov_len;
+        uvloc++;
+        if ((NULL != pHdr) && (0 != uHdrSize)) {
+          sioVec [uvloc].iov_base = (char *)pHdr;
+          sioVec [uvloc].iov_len = uHdrSize;
+          uvsize += sioVec [uvloc].iov_len;
+          uvloc++;
+        }
       }
 
       /* Raw address family and protocol. */
@@ -528,7 +528,7 @@ unsigned int klemTransmit(void *pPtr,
       llAddr.sll_protocol = htons(pRaw->uProtocol);
       llAddr.sll_halen = 6;
       llAddr.sll_ifindex = 2;
-      
+
       /* Set the destination stuff. */
       memcpy(llAddr.sll_addr, pRaw->pLemuMac, ETH_ALEN);
 
@@ -540,17 +540,17 @@ unsigned int klemTransmit(void *pPtr,
 
       /* Do the work of sending that data. */
       uError = privSocketSend(pPtr,
-			      sioVec,
-			      uvloc,
-			      uvsize,
-			      (void *)&llAddr,
-			      sizeof(struct sockaddr_ll));
-      
+                              sioVec,
+                              uvloc,
+                              uvsize,
+                              (void *)&llAddr,
+                              sizeof(struct sockaddr_ll));
+
       /* Set the return value, if greater then 0, to the packet size */
       if (uError > 0) {
-	rvalue = pSkb->len;
+        rvalue = pSkb->len;
       } else {
-	rvalue = 0;
+        rvalue = 0;
       }
 
       up(&pRaw->sendWait);

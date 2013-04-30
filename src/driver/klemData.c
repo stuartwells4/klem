@@ -27,7 +27,7 @@ void *klemDataInit(void)
 {
   KLEMData *pData = NULL;
 
-  pLocalData = kmalloc(sizeof(KLEMData), GFP_KERNEL); 
+  pLocalData = kmalloc(sizeof(KLEMData), GFP_KERNEL);
   pData = pLocalData;
   if (NULL != pData) {
     /* Make sure we set everything to zero */

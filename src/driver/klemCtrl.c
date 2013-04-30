@@ -51,31 +51,31 @@ static void privCtrlProcess(struct work_struct *pPtr)
 
     /* Lock the data structure */
     spin_lock(&pData->sLock);
-    
-    switch(pWork->eCommand) 
+
+    switch(pWork->eCommand)
       {
       case CONNECTION_START:
-	if (NULL == pData->pRawSocket) {
-	  if (strlen(pData->pDevName) > 0) {
-	    KLEM_MSG("Start socket\n");
-	    pData->pRawSocket = klemNetConnect(pData, pData->pDevName);
-	    KLEM_MSG("Start socket Completed\n");
-	  } else {
-	    KLEM_MSG("Network Device not specified.");
-	  }
-	}
+        if (NULL == pData->pRawSocket) {
+          if (strlen(pData->pDevName) > 0) {
+            KLEM_MSG("Start socket\n");
+            pData->pRawSocket = klemNetConnect(pData, pData->pDevName);
+            KLEM_MSG("Start socket Completed\n");
+          } else {
+            KLEM_MSG("Network Device not specified.");
+          }
+        }
 
-	klem80211Start(pData);
-	break;
+        klem80211Start(pData);
+        break;
       case CONNECTION_STOP:
-	klem80211Stop(pData);
-	if (NULL != pData->pRawSocket) {
-	  klemNetDisconnect(pData->pRawSocket);
-	  pData->pRawSocket = NULL;
-	} else {
-	  KLEM_MSG(" Raw Socket never allocated.");
-	}
-	break;
+        klem80211Stop(pData);
+        if (NULL != pData->pRawSocket) {
+          klemNetDisconnect(pData->pRawSocket);
+          pData->pRawSocket = NULL;
+        } else {
+          KLEM_MSG(" Raw Socket never allocated.");
+        }
+        break;
       }
 
     /* Free the work structure */
@@ -93,7 +93,7 @@ static void privCtrlProcess(struct work_struct *pPtr)
 void klemCtrlCreate(void *pPtr)
 {
   KLEMData *pData = (KLEMData *)pPtr;
-  
+
   pData->pCtrlQueue = (void *)create_workqueue(KELM_CONTROL);
 
 }
@@ -109,17 +109,17 @@ void klemCtrlStart(void *pPtr)
   fsSet = get_fs();
   set_fs(KERNEL_DS);
 
-  pWork = (ctrl_data *)kmalloc(sizeof(ctrl_data), GFP_NOFS); 
+  pWork = (ctrl_data *)kmalloc(sizeof(ctrl_data), GFP_NOFS);
 
   if (NULL != pWork) {
     if (NULL != pData->pCtrlQueue)  {
-      
+
       INIT_WORK((struct work_struct *)pWork,
-		privCtrlProcess);
+                privCtrlProcess);
       pWork->eCommand = CONNECTION_START;
       pWork->pData = pData;
       rvalue = queue_work(pData->pCtrlQueue,
-			  (struct work_struct *)pWork);
+                          (struct work_struct *)pWork);
       KLEM_LOG("work queued response %d\n", rvalue);
     } else {
       KLEM_MSG("work queue not active\n");
@@ -142,17 +142,17 @@ void klemCtrlStop(void *pPtr)
   fsSet = get_fs();
   set_fs(KERNEL_DS);
 
-  pWork = (ctrl_data *)kmalloc(sizeof(ctrl_data), GFP_NOFS); 
+  pWork = (ctrl_data *)kmalloc(sizeof(ctrl_data), GFP_NOFS);
 
   if (NULL != pWork) {
     if (NULL != pData->pCtrlQueue)  {
-      
-      INIT_WORK((struct work_struct *)pWork, 
-		privCtrlProcess);
+
+      INIT_WORK((struct work_struct *)pWork,
+                privCtrlProcess);
       pWork->eCommand = CONNECTION_STOP;
       pWork->pData = pData;
       rvalue = queue_work(pData->pCtrlQueue,
-			  (struct work_struct *)pWork);
+                          (struct work_struct *)pWork);
       KLEM_LOG("work queued response %d\n", rvalue);
     } else {
       KLEM_MSG("work queue not active\n");

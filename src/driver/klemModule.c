@@ -66,7 +66,7 @@ static int __init privKLEMInit(void)
   return rvalue;
 }
 
-/* 
+/*
    Inform the linux kernel of the entry point.
 */
 module_init(privKLEMInit);
@@ -80,7 +80,7 @@ static void __exit privKLEMExit(void)
 
   /*
    * This is where the driver will call functions to un-install
-   * itself.  Keep this area simple and remember all device drivers 
+   * itself.  Keep this area simple and remember all device drivers
    * must rmmod properly, and without memory leaks.
    */
   pData = klemGetData();
@@ -97,7 +97,7 @@ static void __exit privKLEMExit(void)
   KLEM_MSG("Module has been removed\n");
 }
 
-/* 
+/*
    Inform the linux kernel of the exit point.
 */
 module_exit(privKLEMExit);
@@ -107,7 +107,7 @@ MODULE_VERSION(KLEM_STR_VERSION);
 
 /*
  * This driver uses GPL only facilities of the linux kernel, so
- * it may not load if you try and change the license. 
+ * it may not load if you try and change the license.
  */
 MODULE_LICENSE("GPL");
 

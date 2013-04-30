@@ -59,7 +59,7 @@ typedef struct klem_data {
   /* What is our id */
   unsigned int uDeviceId;
 
-  /* 
+  /*
    * keep track of our filter.  This doesn't scale, consider
    * a list/hash in future.
   */
