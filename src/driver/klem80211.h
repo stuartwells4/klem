@@ -18,9 +18,15 @@
 
 #ifndef KLEM80211_INCLUDE
 #define KLEM80211_INCLUDE
+#include <linux/version.h>
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,11,0))
+unsigned int klem80211Proc(void *pPtr, char *pOutput);
+#else
+void klem80211Proc(void *pPtr, struct seq_file *pOutput);
+#endif
 
 void klem80211Recv(void *pPtr, struct sk_buff *pSkb);
-unsigned int klem80211Proc(void *pPtr, char *pOutput);
 void klem80211Start(void *pPtr);
 void klem80211Stop(void *pPtr);
 #endif

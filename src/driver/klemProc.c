@@ -1,7 +1,8 @@
 /*
  * Wireless Kernel Link Emulator
  *
- * Copyright (C) 2013 Stuart Wells <swells@stuartwells.net> All rights reserved.
+ * Copyright (C) 2013 - 2014 Stuart Wells <swells@stuartwells.net>
+ * All rights reserved.
  *
  * Licensed under the GNU General Public License, version 2 (GPLv2)
  *
@@ -16,6 +17,13 @@
  *
  */
 #include <linux/proc_fs.h>
+#include <linux/version.h>
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0))
+#include <linux/fs.h>
+#include <linux/seq_file.h>
+#endif
+
 #include "klemHdr.h"
 #include "klemData.h"
 #include "klemCtrl.h"
@@ -46,12 +54,14 @@
 /*
  * Interface to send information to the proc file system.
  */
-static int privProcSend(char *pKernBuf,
-                        char **ppIgnore,
-                        off_t iKernOffset,
-                        int iKernLen,
-                        int *pEOF,
-                        void *pPtr)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,11,0))
+
+static int privProcOutput(char *pKernBuf,
+			  char **ppIgnore,
+			  off_t iKernOffset,
+			  int iKernLen,
+			  int *pEOF,
+			  void *pPtr)
 {
   KLEMData *pData = (KLEMData *)pPtr;
   char *pOutput = pData->proc.pBuffer + iKernOffset;
@@ -138,6 +148,66 @@ static int privProcSend(char *pKernBuf,
   return rvalue;
 }
 
+#else
+
+/* String information for starting/stopping the system. */
+static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
+{
+  KLEMData *pData;
+  int loop;
+  int ufnum = 0;
+
+  if (NULL != pOutput) {
+    pData = (KLEMData *)pOutput->private;
+
+    if (NULL != pData) {
+      seq_printf(pOutput, "KLEM Proc Interface\n\n");
+      seq_printf(pOutput, "Version:              %d\n", pData->uiVersion);
+      seq_printf(pOutput, "raw-device:           %s\n", pData->pDevName);
+
+      if (NULL != pData->pRawSocket) {
+	seq_printf(pOutput, "raw-socket:           %p\n", pData->pRawSocket);
+      } else {
+	seq_printf(pOutput, "raw-socket:           null\n");
+      }
+
+      if (NULL != pData->pNetLink) {
+	seq_printf(pOutput, "netlink:              %p\n", pData->pNetLink);
+      } else {
+	seq_printf(pOutput, "netlink:              null\n");
+      }
+
+      seq_printf(pOutput, "device-id:            %d\n", pData->uDeviceId);
+
+      if (LEMU == pData->eMode) {
+	seq_printf(pOutput, "device-id:            lemu\n");
+      } else {
+	seq_printf(pOutput, "device-id:            bridge\n");
+      }
+
+      ufnum = 0;
+      seq_printf(pOutput, "filter:               ");
+      for (loop = 0; loop < MAX_WIRELESS_NODE; loop++) {
+	if (true == pData->bFilterNode [loop]) {
+	  seq_printf(pOutput, "%03d ", loop);
+	  ufnum += 1;
+	  if ((0 != ufnum) && (0 == ufnum % 8)) {
+	    seq_printf(pOutput, "\nfilter:               ");
+	  }
+	}
+      }
+
+      seq_printf(pOutput, "\n");
+
+      /* Printout wireless emulation data */
+      klem80211Proc(pData, pOutput);
+    }
+  }
+
+  return 0;
+}
+#endif
+
 /*
  * Interface to recv information from the proc file system.
  * A way to use script files to configure experiments without
@@ -145,10 +215,10 @@ static int privProcSend(char *pKernBuf,
  *
  * This routine is not secure.  Remove if you care about security.
  */
-static int privProcRecv(struct file *pFile,
-                        const char __user *pUserBuf,
-                        unsigned long uiCount,
-                        void *pMyData)
+static int privProcInput(struct file *pFile,
+			 const char __user *pUserBuf,
+			 unsigned long uiCount,
+			 void *pMyData)
 {
   KLEMData *pData = (KLEMData *)pMyData;
   const char *pCommand = NULL;
@@ -262,6 +332,46 @@ static int privProcRecv(struct file *pFile,
 
   return uiCount;
 }
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0))
+
+static ssize_t privProcInputSeq(struct file *pFile,
+				const char __user *pBuffer,
+				size_t iCount,
+				loff_t *pPos)
+{
+  void *pData = NULL;
+  size_t rvalue = 0;
+
+  if (NULL != pFile) {
+    if (NULL != pBuffer) {
+      if (iCount > 0) {
+	pData = klemGetData();
+	rvalue = privProcInput(pFile, pBuffer, iCount, pData);
+      }
+    }
+  }
+
+  return rvalue;
+}
+
+#endif
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0))
+
+static int privProcOpen(struct inode *pINode, struct file *pFile)
+{
+  return single_open(pFile, privProcOutputSeq, PDE_DATA(pINode));
+}
+
+static const struct file_operations priv_proc_fops = {
+  .owner   = THIS_MODULE,
+  .open    = privProcOpen,
+  .read    = seq_read,
+  .write   = privProcInputSeq,
+  .llseek  = seq_lseek,
+  .release = single_release,
+};
+#endif
 
 /* Proc entry point */
 void klemProcInit(void *pPtr)
@@ -269,18 +379,26 @@ void klemProcInit(void *pPtr)
   KLEMData *pData = (KLEMData *)pPtr;
 
   if (NULL != pData) {
-
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,11,0))
     pData->proc.pEntry = create_proc_read_entry(KLEM_NAME,
                                                 0644,
                                                 NULL,
-                                                privProcSend,
+                                                privProcOutput,
                                                 pPtr);
 
     if (NULL == pData->proc.pEntry) {
       KLEM_LOG("Failed to create proc read entry %s\n", KLEM_NAME);
     } else {
-      pData->proc.pEntry->write_proc = privProcRecv;
+      pData->proc.pEntry->write_proc = privProcInput;
     }
+#else
+    pData->proc.pEntry = proc_create_data(KLEM_NAME,
+					  0644,
+					  NULL,
+					  &priv_proc_fops,
+					  pPtr);
+
+#endif
   }
 }
 
