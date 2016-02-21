@@ -1402,7 +1402,10 @@ void klem80211Start(void *pPtr)
     SET_IEEE80211_DEV(pMacData->pHW, pMacData->pDev);
 
     /* Setup hardware data */
+    /* SWW CHECK test 3.18 */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,18,0))
     pMacData->pHW->channel_change_time = 1;
+#endif
     pMacData->pHW->queues = KLEM_MAX_QOS;
     pMacData->pHW->wiphy->n_addresses = 1;
 
@@ -1419,8 +1422,11 @@ void klem80211Start(void *pPtr)
 
     pMacData->pHW->flags = IEEE80211_HW_MFP_CAPABLE |
       IEEE80211_HW_SIGNAL_DBM |
+      /* SWW CHECK test 3.18 */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,18,0))
       IEEE80211_HW_SUPPORTS_STATIC_SMPS |
       IEEE80211_HW_SUPPORTS_DYNAMIC_SMPS |
+#endif
       IEEE80211_HW_AMPDU_AGGREGATION;
 
     /* Lets not fake vif and sta for now */

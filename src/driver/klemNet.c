@@ -49,8 +49,11 @@ typedef struct raw_socket_def {
   KLEMData *pData;
   bool bConnected;
   wait_queue_head_t recvQueue;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0))
+  void (*recvReady)(struct sock *);
+#else
   void (*recvReady)(struct sock *, int);
-
+#endif
   /* mac address we will need for the raw ethernet packet */
   char pDevMac [ETH_ALEN];
   char pLemuMac [ETH_ALEN];
@@ -69,6 +72,21 @@ typedef struct raw_socket_def {
   u32 uVersion;
 } raw_socket;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0))
+static void privRecvReady(struct sock *pSocket)
+{
+  raw_socket *pRaw = (raw_socket *)pSocket->sk_user_data;
+
+  if (NULL != pRaw) {
+    if (NULL != pRaw->recvReady) {
+      pRaw->recvReady(pSocket);
+    }
+
+    /* Wake up */
+    wake_up_all(&pRaw->recvQueue);
+  }
+}
+#else
 static void privRecvReady(struct sock *pSocket, int iBytes)
 {
   raw_socket *pRaw = (raw_socket *)pSocket->sk_user_data;
@@ -82,7 +100,7 @@ static void privRecvReady(struct sock *pSocket, int iBytes)
     wake_up_all(&pRaw->recvQueue);
   }
 }
-
+#endif
 /*
  * Create a raw connection on a network device
  */
@@ -248,17 +266,26 @@ static unsigned int privSocketSend(void *pPtr,
     mHdr.msg_namelen = uNameLength;
 
     while ((true == pRaw->bConnected) && (uSendLength > 0)) {
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,19,0))
       mHdr.msg_iov = &pVec [uVecCurrent];
       mHdr.msg_iovlen = uVecLength - uVecCurrent;
-
+#endif
       iRetries = 0;
       iError = 0;
       while ((iRetries++ < MAX_RETRIES) && (true == pRaw->bConnected)) {
         /* Finally the kernel does it magic, */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,19,0))
         iError = sock_sendmsg(pRaw->pSocket,
                               &mHdr,
                               uSendLength);
-
+#else
+        iError = kernel_sendmsg(pRaw->pSocket,
+				&mHdr,
+				(struct kvec *)&pVec [uVecCurrent],
+				uVecLength - uVecCurrent,
+				uSendLength);
+#endif
         if (signal_pending(current)) {
           /* dequeue a sigkill and quiet. */
           spin_lock_irqsave(&current->sighand->siglock, ulFlags);
