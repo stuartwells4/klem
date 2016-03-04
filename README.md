@@ -3,6 +3,8 @@ klem
 
 Wireless 802.11 Linux Kernel Link Emulation
 
+(Last tested on Kernel 3.19.0.52 for Ubutnu 14.04)
+
 KLEM is a virtual wireless 802.11 network driver that connects devices together using Kernel Link EMulation.
 
 The Linux kernel since version 2.6.32 has a SoftMAC 802.11 framework known as mac80211 that allows wireless frame management to be done completely in software.  The KLEM device driver uses this framework and wraps the generated 802.11 frames into a raw Ethernet packet and broadcasts them over a wired network.   Each virtual or physical machine connected to the wired network that receives the raw KLEM packet can strip out the wireless packet and process it as if that packet was received from an actual radio.
