@@ -67,7 +67,7 @@ Alternative network deployments can be accomplished by setting the numerical KLE
 Build
 -----
 
-KLEM was built and tested using Fedora Core 15 and 19.   It is assumed that the kernel development package has been installed onto the system.  In Fedora Core, the kernel development package is installed in /usr/src/kernels/`uname –r` directory.
+KLEM was built and tested using Fedora Core 15 19 and Ubutnu 14.04.   It is assumed that the kernel development package has been installed onto the system.  In Fedora Core, the kernel development package is installed in /usr/src/kernels/`uname –r` directory.
 
 The KLEM driver also requires the same gcc compiler used to build the kernel be installed, along with the makefile packages.
 
