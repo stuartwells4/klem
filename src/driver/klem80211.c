@@ -1,7 +1,7 @@
 /*
  * Wireless Kernel Link Emulator
  *
- * Copyright (C) 2013 - 2014 Stuart Wells <swells@stuartwells.net>
+ * Copyright (C) 2013 - 2016 Stuart Wells <swells@stuartwells.net>
  * All rights reserved.
  *
  * Licensed under the GNU General Public License, version 2 (GPLv2)
@@ -1526,4 +1526,3 @@ void klem80211Stop(void *pPtr)
 
   KLEM_MSG("Removed wireless device\n");
 }
-

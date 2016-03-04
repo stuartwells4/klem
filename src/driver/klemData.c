@@ -1,7 +1,8 @@
 /*
  * Wireless Kernel Link Emulator
  *
- * Copyright (C) 2013 Stuart Wells <swells@stuartwells.net> All rights reserved.
+ * Copyright (C) 2013 - 2016 Stuart Wells <swells@stuartwells.net>
+ * All rights reserved.
  *
  * Licensed under the GNU General Public License, version 2 (GPLv2)
  *
