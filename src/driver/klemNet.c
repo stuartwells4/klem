@@ -119,10 +119,17 @@ static void *privCreateRaw(char *pDevLabel)
       pRaw->bConnected = false;
 
       /* Create our socket */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,2,0))
       rvalue = sock_create_kern(PF_PACKET,
                                 SOCK_RAW,
                                 htons(ETH_P_ALL),
                                 &pRaw->pSocket);
+#else
+      rvalue = sock_create_lite(PF_PACKET,
+                                SOCK_RAW,
+                                htons(ETH_P_ALL),
+                                &pRaw->pSocket);
+#endif
       if ((rvalue >= 0) && (NULL != pRaw->pSocket)) {
         /* Need to reference our data structure */
         pRaw->pSocket->sk->sk_user_data = (void *)pRaw;
@@ -165,8 +172,13 @@ static void *privCreateRaw(char *pDevLabel)
         write_unlock_bh(&pRaw->pSocket->sk->sk_callback_lock);
 
         /* Find the device were will transmit the raw packet. */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,2,0))
         pDev = __dev_get_by_name(pRaw->pSocket->sk->__sk_common.skc_net,
                                  pDevLabel);
+#else
+        pDev = __dev_get_by_name(pRaw->pSocket->sk->__sk_common.skc_net.net,
+                                 pDevLabel);
+#endif
         if (NULL != pDev) {
           memcpy(pRaw->pDevMac, (char *)pDev->perm_addr, ETH_ALEN);
         } else {
