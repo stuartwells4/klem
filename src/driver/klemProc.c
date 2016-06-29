@@ -229,8 +229,12 @@ static int privProcInput(struct file *pFile,
   bool bParse = false;
   unsigned int loop = 0;
   unsigned int utmp;
+  mm_segment_t mSegment;
+
+  mSegment = get_fs();
 
   spin_lock(&pData->sLock);
+  set_fs(KERNEL_DS);
 
   /* Look for command = values, and act upon it. */
   loop = 0;
@@ -329,6 +333,7 @@ static int privProcInput(struct file *pFile,
   }
 
   spin_unlock(&pData->sLock);
+  set_fs(mSegment);
 
   return uiCount;
 }
