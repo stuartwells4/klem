@@ -232,9 +232,9 @@ static int privProcInput(struct file *pFile,
   mm_segment_t mSegment;
 
   mSegment = get_fs();
+  set_fs(KERNEL_DS);
 
   spin_lock(&pData->sLock);
-  set_fs(KERNEL_DS);
 
   /* Look for command = values, and act upon it. */
   loop = 0;
