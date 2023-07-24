@@ -7,7 +7,7 @@ KLEM is a virtual wireless 802.11 network driver that connects devices together 
 
 Started using this example driver to test mesh networking.   Added scripts to setup bridge interface and to start the virtal machines.
 
-Currently using a ubuntu host on an M1 Macbook Proc to run these qemu sessions.  Probably a bit recursive from a virtual stack point of view.
+Currently using a ubuntu host on an Apple MacBook Pro M1 to run these qemu sessions.  Probably a bit recursive from a virtual stack point of view.
 
 ./startbr0.sh
 
