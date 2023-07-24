@@ -14,5 +14,6 @@ Currently using a ubuntu host on an M1 Macbook Proc to run these qemu sessions. 
 This script opens up iptables, creates br0 and allows traffic to route
 
 ./startvm.sh tapX
+
 Starts the qemu images contained in vmlinux-3.18.99 and initramfs.cpio.tar.gz.
 
