@@ -17,3 +17,10 @@ This script opens up iptables, creates br0 and allows traffic to route
 
 Starts the qemu images contained in vmlinux-3.18.99 and initramfs.cpio.tar.gz.
 
+===
+
+Created a startup script for Apple MacBook Pro M1
+
+Still had to execute it as root.
+
+sudo ./startm1.sh

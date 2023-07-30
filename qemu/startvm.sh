@@ -1,9 +1,6 @@
 #!/bin/bash
 EMAC=`printf 'DE:AD:BE:EF:%02X:%02X\n' $((RANDOM%256)) $((RANDOM%256))`
 
-#!/bin/sh
-set -x
-
 switch=br0
 
 # tunctl -u `whoami` -t $1 (use ip tuntap instead!)
