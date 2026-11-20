@@ -26,6 +26,7 @@ static KLEMData *pLocalData = NULL;
 void *klemDataInit(void)
 {
   KLEMData *pData = NULL;
+  int iLoop;
 
   pLocalData = kzalloc(sizeof(KLEMData), GFP_KERNEL);
   pData = pLocalData;
@@ -41,6 +42,9 @@ void *klemDataInit(void)
     pData->pMacData = NULL;
     pData->uiDeviceId = 0;
     memset(pData->bFilterNode, false, MAX_WIRELESS_NODE);
+    for (iLoop = 0; iLoop < MAX_WIRELESS_NODE; iLoop++) {
+      pData->iSignalNode [iLoop] = KLEM_SIGNAL_DEFAULT;
+    }
     pData->eMode = LEMU;
     pData->eStatus = KLEM_STATUS_STOPPED;
     pData->pStatusReason = NULL;

@@ -50,6 +50,10 @@
 /* string to unfilter/accept node inforamation */
 #define ACCEPT_STR "accept"
 
+/* string to set the emulated signal strength from a node, id:dBm */
+#define SIGNAL_STR "signal"
+#define SIGNAL_OFF_STR "off"
+
 /* string to set brige/lemu */
 #define MODE_STR "mode"
 #define MODE_LEMU_STR "lemu"
@@ -141,6 +145,20 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
 
       seq_printf(pOutput, "\n");
 
+      iFilterNum = 0;
+      seq_printf(pOutput, "signal:               ");
+      for (iLoop = 0; iLoop < MAX_WIRELESS_NODE; iLoop++) {
+	if (KLEM_SIGNAL_DEFAULT != pData->iSignalNode [iLoop]) {
+	  seq_printf(pOutput, "%03d:%d ", iLoop, pData->iSignalNode [iLoop]);
+	  iFilterNum += 1;
+	  if (0 == iFilterNum % 8) {
+	    seq_printf(pOutput, "\nsignal:               ");
+	  }
+	}
+      }
+
+      seq_printf(pOutput, "\n");
+
       /* Printout wireless emulation data */
       klem80211Proc(pData, pOutput);
       mutex_unlock(&pData->sLock);
@@ -181,6 +199,44 @@ static int privProcParseId(const char *pValue, unsigned int uiValueLen,
 }
 
 /*
+ * Parse id:dBm, or id:off to go back to the sender's transmit power.
+ * The value is not nul terminated in the input buffer.
+ */
+static int privProcParseSignal(const char *pValue, unsigned int uiValueLen,
+                               unsigned int *puiId, int *piSignal)
+{
+  const char *pColon = memchr(pValue, ':', uiValueLen);
+  const char *pLevel = NULL;
+  unsigned int uiLevelLen = 0;
+  char pNumber [8];
+  int iRc = -EINVAL;
+
+  if (NULL != pColon) {
+    iRc = privProcParseId(pValue, pColon - pValue, puiId);
+    pLevel = pColon + 1;
+    uiLevelLen = uiValueLen - (pLevel - pValue);
+  }
+
+  if (0 == iRc) {
+    if (privProcMatch(pLevel, uiLevelLen, SIGNAL_OFF_STR)) {
+      *piSignal = KLEM_SIGNAL_DEFAULT;
+    } else if (uiLevelLen < sizeof(pNumber)) {
+      memcpy(pNumber, pLevel, uiLevelLen);
+      pNumber [uiLevelLen] = '\0';
+      iRc = kstrtoint(pNumber, 10, piSignal);
+      if ((0 == iRc) &&
+          ((*piSignal < KLEM_SIGNAL_MIN) || (*piSignal > KLEM_SIGNAL_MAX))) {
+        iRc = -EINVAL;
+      }
+    } else {
+      iRc = -EINVAL;
+    }
+  }
+
+  return iRc;
+}
+
+/*
  * Apply one command = value pair.  Returns 0, or -EINVAL for an
  * unknown command or a bad value, leaving the setting unchanged.
  */
@@ -189,6 +245,7 @@ static int privProcCommand(KLEMData *pData,
                            const char *pValue, unsigned int uiValueLen)
 {
   unsigned int uiId = 0;
+  int iSignal = 0;
   int iRc = 0;
 
   if (privProcMatch(pCommand, uiCommandLen, COMMAND_STR)) {
@@ -220,6 +277,11 @@ static int privProcCommand(KLEMData *pData,
     iRc = privProcParseId(pValue, uiValueLen, &uiId);
     if (0 == iRc) {
       pData->bFilterNode [uiId] = false;
+    }
+  } else if (privProcMatch(pCommand, uiCommandLen, SIGNAL_STR)) {
+    iRc = privProcParseSignal(pValue, uiValueLen, &uiId, &iSignal);
+    if (0 == iRc) {
+      WRITE_ONCE(pData->iSignalNode [uiId], iSignal);
     }
   } else if (privProcMatch(pCommand, uiCommandLen, MODE_STR)) {
     if (privProcMatch(pValue, uiValueLen, MODE_LEMU_STR)) {

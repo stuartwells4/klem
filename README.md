@@ -73,6 +73,13 @@ Alternative network deployments can be accomplished by setting the numerical KLE
      virtual topologies to be represented.
      #echo "filter = 30" > /proc/klem
 
+     Each node can set the signal strength, in dBm (-100 to 0), that it
+     reports for frames from another ID, so software that picks the
+     strongest access point sees a realistic choice.  "off" goes back to
+     the sender's transmit power.  Settings take effect immediately.
+     #echo "signal = 30:-72" > /proc/klem
+     #echo "signal = 30:off" > /proc/klem
+
      The mode is lemu (the default) or bridge.  Set it before starting;
      changing it while running needs a stop and start to take effect.
      #echo "mode = lemu" > /proc/klem

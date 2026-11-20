@@ -20,11 +20,19 @@
 
 #include <linux/wait.h>
 #include <linux/mutex.h>
+#include <linux/kernel.h>
 
 #define KLEM_LOG(fmt, args...) printk("klem::%s "fmt, __func__, args)
 #define KLEM_MSG(fmt) printk("klem::%s "fmt, __func__)
 
 #define MAX_WIRELESS_NODE 256
+
+/* Emulated signal strength limits, in dBm. */
+#define KLEM_SIGNAL_MIN (-100)
+#define KLEM_SIGNAL_MAX 0
+
+/* iSignalNode value meaning use the sender's transmit power. */
+#define KLEM_SIGNAL_DEFAULT INT_MIN
 #define MAX_DEVICE_NAME 64
 
 typedef struct klem_data {
@@ -70,6 +78,13 @@ typedef struct klem_data {
    * a list/hash in future.
   */
   bool bFilterNode [MAX_WIRELESS_NODE];
+
+  /*
+   * Emulated signal strength in dBm of frames received from each node,
+   * or KLEM_SIGNAL_DEFAULT to report the sender's transmit power.
+   * Written under sLock, read without it on the receive path.
+   */
+  int iSignalNode [MAX_WIRELESS_NODE];
 
   /*
    * Specificy if the driver is a virtual wireless / lemu

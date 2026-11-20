@@ -1185,6 +1185,7 @@ void klem80211Recv(void *pPtr, struct sk_buff *pSkb)
   struct ieee80211_hdr *pWHdr = NULL;
   unsigned int uiQos = 0;
   unsigned int uiTmp;
+  int iSignal;
   struct sk_buff *pTmpSkb = pSkb;
   bool bRecvFlag = false;
 
@@ -1222,6 +1223,11 @@ void klem80211Recv(void *pPtr, struct sk_buff *pSkb)
         uiTmp = ntohl(pTapHdr->uId);
         if (uiTmp < MAX_WIRELESS_NODE) {
           if (false == pData->bFilterNode [uiTmp]) {
+            /* Use the emulated signal strength for this sender, if set. */
+            iSignal = READ_ONCE(pData->iSignalNode [uiTmp]);
+            if (KLEM_SIGNAL_DEFAULT != iSignal) {
+              recvStat.signal = iSignal;
+            }
             memcpy(IEEE80211_SKB_RXCB(pTmpSkb), &recvStat, sizeof(recvStat));
             bRecvFlag = true;
           }
