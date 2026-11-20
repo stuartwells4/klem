@@ -23,6 +23,9 @@
 #include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/mutex.h>
+#include <linux/capability.h>
+#include <linux/kernel.h>
+#include <linux/user_namespace.h>
 
 #include "klemHdr.h"
 #include "klemData.h"
@@ -51,6 +54,32 @@
 #define MODE_STR "mode"
 #define MODE_LEMU_STR "lemu"
 #define MODE_BRIDGE_STR "bridge"
+
+/* Text shown for KLEMData.eStatus. */
+static const char *privProcStatusName(int eStatus)
+{
+  const char *pName = "unknown";
+
+  switch (eStatus) {
+  case KLEM_STATUS_STOPPED:
+    pName = "stopped";
+    break;
+  case KLEM_STATUS_STARTING:
+    pName = "starting";
+    break;
+  case KLEM_STATUS_RUNNING:
+    pName = "running";
+    break;
+  case KLEM_STATUS_STOPPING:
+    pName = "stopping";
+    break;
+  case KLEM_STATUS_FAILED:
+    pName = "failed";
+    break;
+  }
+
+  return pName;
+}
 
 /*
  * Interface to send information to the proc file system.
@@ -91,6 +120,13 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
 	seq_printf(pOutput, "mode:                 bridge\n");
       }
 
+      seq_printf(pOutput, "status:               %s",
+		 privProcStatusName(pData->eStatus));
+      if (NULL != pData->pStatusReason) {
+	seq_printf(pOutput, " (%s)", pData->pStatusReason);
+      }
+      seq_printf(pOutput, "\n");
+
       iFilterNum = 0;
       seq_printf(pOutput, "filter:               ");
       for (iLoop = 0; iLoop < MAX_WIRELESS_NODE; iLoop++) {
@@ -123,11 +159,95 @@ static bool privProcMatch(const char *pWord, unsigned int uiLen,
 }
 
 /*
+ * Parse a node id (0 to MAX_WIRELESS_NODE - 1).  The value is not
+ * nul terminated in the input buffer, so copy it out for kstrtouint.
+ */
+static int privProcParseId(const char *pValue, unsigned int uiValueLen,
+                           unsigned int *puiId)
+{
+  char pNumber [8];
+  int iRc = -EINVAL;
+
+  if (uiValueLen < sizeof(pNumber)) {
+    memcpy(pNumber, pValue, uiValueLen);
+    pNumber [uiValueLen] = '\0';
+    iRc = kstrtouint(pNumber, 10, puiId);
+    if ((0 == iRc) && (*puiId >= MAX_WIRELESS_NODE)) {
+      iRc = -EINVAL;
+    }
+  }
+
+  return iRc;
+}
+
+/*
+ * Apply one command = value pair.  Returns 0, or -EINVAL for an
+ * unknown command or a bad value, leaving the setting unchanged.
+ */
+static int privProcCommand(KLEMData *pData,
+                           const char *pCommand, unsigned int uiCommandLen,
+                           const char *pValue, unsigned int uiValueLen)
+{
+  unsigned int uiId = 0;
+  int iRc = 0;
+
+  if (privProcMatch(pCommand, uiCommandLen, COMMAND_STR)) {
+    if (privProcMatch(pValue, uiValueLen, COMMAND_START_STR)) {
+      klemCtrlStart(pData);
+    } else if (privProcMatch(pValue, uiValueLen, COMMAND_STOP_STR)) {
+      klemCtrlStop(pData);
+    } else {
+      iRc = -EINVAL;
+    }
+  } else if (privProcMatch(pCommand, uiCommandLen, DEVICE_STR)) {
+    if (uiValueLen < sizeof(pData->pDevName)) {
+      memset(pData->pDevName, 0, sizeof(pData->pDevName));
+      memcpy(pData->pDevName, pValue, uiValueLen);
+    } else {
+      iRc = -EINVAL;
+    }
+  } else if (privProcMatch(pCommand, uiCommandLen, ID_STR)) {
+    iRc = privProcParseId(pValue, uiValueLen, &uiId);
+    if (0 == iRc) {
+      pData->uiDeviceId = uiId;
+    }
+  } else if (privProcMatch(pCommand, uiCommandLen, FILTER_STR)) {
+    iRc = privProcParseId(pValue, uiValueLen, &uiId);
+    if (0 == iRc) {
+      pData->bFilterNode [uiId] = true;
+    }
+  } else if (privProcMatch(pCommand, uiCommandLen, ACCEPT_STR)) {
+    iRc = privProcParseId(pValue, uiValueLen, &uiId);
+    if (0 == iRc) {
+      pData->bFilterNode [uiId] = false;
+    }
+  } else if (privProcMatch(pCommand, uiCommandLen, MODE_STR)) {
+    if (privProcMatch(pValue, uiValueLen, MODE_LEMU_STR)) {
+      pData->eMode = LEMU;
+    } else if (privProcMatch(pValue, uiValueLen, MODE_BRIDGE_STR)) {
+      pData->eMode = BRIDGE;
+    } else {
+      iRc = -EINVAL;
+    }
+  } else {
+    iRc = -EINVAL;
+  }
+
+  if (0 != iRc) {
+    KLEM_LOG("invalid setting %.*s = %.*s\n",
+             (int)uiCommandLen, pCommand, (int)uiValueLen, pValue);
+  }
+
+  return iRc;
+}
+
+/*
  * Interface to recv information from the proc file system.
  * A way to use script files to configure experiments without
  * use netlink.
  *
- * This routine is not secure.  Remove if you care about security.
+ * Every valid pair is applied.  Returns uCount, or -EINVAL if any
+ * pair was invalid or incomplete.
  */
 static int privProcInput(struct file *pFile,
 			 const char *pUserBuf,
@@ -142,7 +262,7 @@ static int privProcInput(struct file *pFile,
   bool bCommand = true;
   bool bParse = false;
   unsigned int uiLoop = 0;
-  unsigned int uiTmp;
+  int iRc = 0;
   char cByte;
 
   mutex_lock(&pData->sLock);
@@ -160,6 +280,7 @@ static int privProcInput(struct file *pFile,
     switch(cByte)
       {
       case ' ':
+      case '\t':
       case '\r':
       case '\n':
         /* If we have a pvalue, we found command, value, now parse. */
@@ -194,49 +315,9 @@ static int privProcInput(struct file *pFile,
 
     /* Should parsing those command = values */
     if ((NULL != pCommand) && (NULL != pValue) && (true == bParse)) {
-      /* Do we have a command */
-      if (privProcMatch(pCommand, uiCommandLen, COMMAND_STR)) {
-        if (privProcMatch(pValue, uiValueLen, COMMAND_START_STR)) {
-          klemCtrlStart(pData);
-        } else if (privProcMatch(pValue, uiValueLen, COMMAND_STOP_STR)) {
-          klemCtrlStop(pData);
-        }
-      } else if (privProcMatch(pCommand, uiCommandLen, DEVICE_STR)) {
-        if (uiValueLen < sizeof(pData->pDevName)) {
-          memset(pData->pDevName, 0, sizeof(pData->pDevName));
-          strncpy(pData->pDevName, pValue, uiValueLen);
-        }
-      } else if (privProcMatch(pCommand, uiCommandLen, ID_STR)) {
-        uiTmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
-        if (uiTmp >= MAX_WIRELESS_NODE) {
-          pData->uiDeviceId = 0;
-          KLEM_LOG("Error, device id %s must be beteen 0-255\n",
-                   pValue);
-        } else {
-          pData->uiDeviceId = uiTmp;
-        }
-      } else if (privProcMatch(pCommand, uiCommandLen, FILTER_STR)) {
-        uiTmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
-        if (uiTmp >= MAX_WIRELESS_NODE) {
-          KLEM_LOG("Error, filter id %s must be beteen 0-255\n",
-                   pValue);
-        } else {
-          pData->bFilterNode [uiTmp] = true;
-        }
-      } else if (privProcMatch(pCommand, uiCommandLen, ACCEPT_STR)) {
-        uiTmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
-        if (uiTmp >= MAX_WIRELESS_NODE) {
-          KLEM_LOG("Error, accept id %s must be beteen 0-255\n",
-                   pValue);
-        } else {
-          pData->bFilterNode [uiTmp] = false;
-        }
-      } else if (privProcMatch(pCommand, uiCommandLen, MODE_STR)) {
-        if (privProcMatch(pValue, uiValueLen, MODE_LEMU_STR)) {
-          pData->eMode = LEMU;
-        } else if (privProcMatch(pValue, uiValueLen, MODE_BRIDGE_STR)) {
-          pData->eMode = BRIDGE;
-        }
+      if (0 != privProcCommand(pData, pCommand, uiCommandLen,
+                               pValue, uiValueLen)) {
+        iRc = -EINVAL;
       }
       pCommand = NULL;
       pValue = NULL;
@@ -250,8 +331,17 @@ static int privProcInput(struct file *pFile,
     uiLoop += 1;
   }
 
+  /* A command without a value, or a value without a command. */
+  if ((NULL != pCommand) || (NULL != pValue)) {
+    KLEM_MSG("incomplete setting, expected command = value\n");
+    iRc = -EINVAL;
+  }
+
   mutex_unlock(&pData->sLock);
 
+  if (0 != iRc) {
+    return iRc;
+  }
   return uCount;
 }
 static ssize_t privProcInputSeq(struct file *pFile,
@@ -262,11 +352,25 @@ static ssize_t privProcInputSeq(struct file *pFile,
   void *pData = NULL;
   char *pKernBuf = NULL;
   ssize_t iRvalue = 0;
+  int iRc = 0;
 
-  if ((NULL != pFile) && (NULL != pBuffer) && (uCount > 0)) {
-    /* Commands are short, a page is plenty. */
+  /*
+   * The file is 0644, but a root process inside a container can still
+   * write it.  Require CAP_NET_ADMIN in the initial user namespace,
+   * checked against whoever opened the file.
+   */
+  if ((NULL == pFile) ||
+      (!file_ns_capable(pFile, &init_user_ns, CAP_NET_ADMIN))) {
+    return -EPERM;
+  }
+
+  if ((NULL != pBuffer) && (uCount > 0)) {
+    /*
+     * Commands are short, a page is plenty.  Reject longer writes
+     * rather than truncating, which could cut a value short.
+     */
     if (uCount > PAGE_SIZE) {
-      uCount = PAGE_SIZE;
+      return -EINVAL;
     }
 
     /* Copy the user data into kernel memory, nul terminated. */
@@ -277,10 +381,15 @@ static ssize_t privProcInputSeq(struct file *pFile,
 
     pData = klemGetData();
     if (NULL != pData) {
-      privProcInput(pFile, pKernBuf, strlen(pKernBuf), pData);
+      iRc = privProcInput(pFile, pKernBuf, strlen(pKernBuf), pData);
     }
     kfree(pKernBuf);
-    iRvalue = uCount;
+
+    if (iRc < 0) {
+      iRvalue = iRc;
+    } else {
+      iRvalue = uCount;
+    }
   }
 
   return iRvalue;

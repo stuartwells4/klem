@@ -58,17 +58,31 @@ static void privCtrlProcess(struct work_struct *pPtr)
     switch(pWork->eCommand)
       {
       case CONNECTION_START:
+        pData->pStatusReason = NULL;
         if (NULL == pData->pRawSocket) {
           if (strlen(pData->pDevName) > 0) {
             KLEM_MSG("Start socket\n");
             pData->pRawSocket = klemNetConnect(pData, pData->pDevName);
             KLEM_MSG("Start socket Completed\n");
+            if (NULL == pData->pRawSocket) {
+              pData->pStatusReason = "cannot open raw socket on device";
+            }
           } else {
             KLEM_MSG("Network Device not specified.");
+            pData->pStatusReason = "no device set";
           }
         }
 
         klem80211Start(pData);
+        if ((NULL == pData->pMacData) && (NULL == pData->pStatusReason)) {
+          pData->pStatusReason = "cannot register radio";
+        }
+
+        if (NULL == pData->pStatusReason) {
+          pData->eStatus = KLEM_STATUS_RUNNING;
+        } else {
+          pData->eStatus = KLEM_STATUS_FAILED;
+        }
         break;
       case CONNECTION_STOP:
         /*
@@ -84,6 +98,8 @@ static void privCtrlProcess(struct work_struct *pPtr)
           KLEM_MSG(" Raw Socket never allocated.");
         }
         klem80211Stop(pData);
+        pData->eStatus = KLEM_STATUS_STOPPED;
+        pData->pStatusReason = NULL;
         break;
       }
 
@@ -110,6 +126,7 @@ void klemCtrlCreate(void *pPtr)
 /*
  * Queue a start/stop command onto the control work queue so the
  * (sleeping) socket and radio setup happens outside the caller's context.
+ * Called with pData->sLock held, which protects eStatus.
  */
 static void privCtrlQueue(KLEMData *pData, int eCommand)
 {
@@ -118,6 +135,8 @@ static void privCtrlQueue(KLEMData *pData, int eCommand)
 
   if (NULL == pData->pCtrlQueue) {
     KLEM_MSG("work queue not active\n");
+    pData->eStatus = KLEM_STATUS_FAILED;
+    pData->pStatusReason = "work queue not active";
     return;
   }
 
@@ -127,8 +146,17 @@ static void privCtrlQueue(KLEMData *pData, int eCommand)
     INIT_WORK(&pWork->ctrl_work_hdr, privCtrlProcess);
     pWork->eCommand = eCommand;
     pWork->pData = pData;
+    if (CONNECTION_START == eCommand) {
+      pData->eStatus = KLEM_STATUS_STARTING;
+    } else {
+      pData->eStatus = KLEM_STATUS_STOPPING;
+    }
+    pData->pStatusReason = NULL;
     iRvalue = queue_work(pData->pCtrlQueue, &pWork->ctrl_work_hdr);
     KLEM_LOG("work queued response %d\n", iRvalue);
+  } else {
+    pData->eStatus = KLEM_STATUS_FAILED;
+    pData->pStatusReason = "out of memory queueing command";
   }
 }
 

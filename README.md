@@ -49,6 +49,13 @@ The default 802.11 network simulation used by KLEM simulates an environment wher
      eth0    represents the wired Ethernet connection to transmit the raw
              klem packets.
 
+The start and stop commands finish in the background.  Read /proc/klem to see
+the result: the status line shows starting, then running, or failed with a
+reason such as "no device set".
+
+     #grep status /proc/klem
+     status:               running
+
 Once each virtual or physical machine is set up, you should be able to ping 
 each of them.
  
