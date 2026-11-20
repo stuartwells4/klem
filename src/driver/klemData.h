@@ -79,6 +79,21 @@ typedef struct klem_data {
     LEMU,
     BRIDGE,
   } eMode;
+
+  /*
+   * Result of the last start/stop, shown in /proc/klem.  The commands
+   * run on a work queue, so userspace reads this to see when they finish.
+   */
+  enum {
+    KLEM_STATUS_STOPPED,
+    KLEM_STATUS_STARTING,
+    KLEM_STATUS_RUNNING,
+    KLEM_STATUS_STOPPING,
+    KLEM_STATUS_FAILED,
+  } eStatus;
+
+  /* Why the last start failed, NULL otherwise. */
+  const char *pStatusReason;
   /* remember the class */
   struct class *pClass;
 } KLEMData;

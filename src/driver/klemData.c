@@ -42,6 +42,8 @@ void *klemDataInit(void)
     pData->uiDeviceId = 0;
     memset(pData->bFilterNode, false, MAX_WIRELESS_NODE);
     pData->eMode = LEMU;
+    pData->eStatus = KLEM_STATUS_STOPPED;
+    pData->pStatusReason = NULL;
     pData->pClass = NULL;
 
     /* Lock protecting the data structure (process context only). */
