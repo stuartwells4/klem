@@ -40,7 +40,7 @@ static int __init privKLEMInit(void)
    * This is where the driver will call functions to install
    * its functions.  Keep this area simple.
    */
-  int rvalue = -ENOMEM;
+  int iRvalue = -ENOMEM;
   KLEMData *pData = NULL;
 
   pData = klemDataInit();
@@ -54,26 +54,26 @@ static int __init privKLEMInit(void)
 #endif
     if (IS_ERR(pData->pClass)) {
       KLEM_MSG("Failed to get some class\n");
-      rvalue = PTR_ERR(pData->pClass);
+      iRvalue = PTR_ERR(pData->pClass);
       pData->pClass = NULL;
       klemDataDeInit();
-      return rvalue;
+      return iRvalue;
     }
 
     /* Let the world know we loaded */
     klemCtrlCreate(pData);
     klemProcInit(pData);
-    rvalue = 0;
+    iRvalue = 0;
   } else {
-    rvalue = -ENOMEM;
+    iRvalue = -ENOMEM;
   }
 
-  if (0 == rvalue) {
+  if (0 == iRvalue) {
     KLEM_MSG("Module sucessfully installed\n");
   } else {
     KLEM_MSG("Module failed to install\n");
   }
-  return rvalue;
+  return iRvalue;
 }
 
 /*

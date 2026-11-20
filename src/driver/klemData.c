@@ -40,7 +40,7 @@ void *klemDataInit(void)
     pData->pRawSocket = NULL;
     pData->pCtrlQueue = NULL;
     pData->pMacData = NULL;
-    pData->uDeviceId = 0;
+    pData->uiDeviceId = 0;
     memset(pData->bFilterNode, false, MAX_WIRELESS_NODE);
     pData->eMode = LEMU;
     pData->pClass = NULL;

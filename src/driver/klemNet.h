@@ -23,7 +23,7 @@ struct sk_buff;
 
 void *klemNetConnect(void *pPtr, char *pDevLabel);
 void klemNetDisconnect(void *pPtr);
-unsigned int klemTransmit(void *pPtr, 
+unsigned int klemNetTransmit(void *pPtr, 
 			  struct sk_buff *pSkb,
-			  char *pHdr, unsigned int uHdrSize);
+			  char *pHdr, unsigned int uiHdrSize);
 #endif

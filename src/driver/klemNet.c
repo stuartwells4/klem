@@ -51,8 +51,8 @@ typedef struct raw_socket_def {
   struct socket *pSocket;
   KLEMData *pData;
   bool bConnected;
-  wait_queue_head_t recvQueue;
-  void (*recvReady)(struct sock *);
+  wait_queue_head_t sRecvQueue;
+  void (*pRecvReady)(struct sock *);
 
   /* mac address we will need for the raw ethernet packet */
   char pDevMac [ETH_ALEN];
@@ -62,15 +62,15 @@ typedef struct raw_socket_def {
   int iIfIndex;
 
   /* make send thread safe. */
-  struct semaphore sendWait;
+  struct semaphore sSendWait;
   u16 uProtocol;
 
   /* Information to keep track of the sending / recieving threads */
   char pRecvName [64];
   void *pRecvThread;
   union {
-    char str [4];
-    u32 ui;
+    char pStr [4];
+    u32 uValue;
   } hdr;
   u32 uVersion;
 } raw_socket;
@@ -80,12 +80,12 @@ static void privRecvReady(struct sock *pSocket)
   raw_socket *pRaw = (raw_socket *)pSocket->sk_user_data;
 
   if (NULL != pRaw) {
-    if (NULL != pRaw->recvReady) {
-      pRaw->recvReady(pSocket);
+    if (NULL != pRaw->pRecvReady) {
+      pRaw->pRecvReady(pSocket);
     }
 
     /* Wake up */
-    wake_up_all(&pRaw->recvQueue);
+    wake_up_all(&pRaw->sRecvQueue);
   }
 }
 
@@ -95,7 +95,7 @@ static void privRecvReady(struct sock *pSocket)
 static void *privCreateRaw(char *pDevLabel)
 {
   raw_socket *pRaw = NULL;
-  int rvalue;
+  int iRvalue;
   struct net_device *pDev = NULL;
 
   if (NULL != pDevLabel) {
@@ -116,13 +116,13 @@ static void *privCreateRaw(char *pDevLabel)
       pRaw->iIfIndex = pDev->ifindex;
 
       /* Create our socket (kernel socket in the initial namespace) */
-      rvalue = sock_create_kern(&init_net,
+      iRvalue = sock_create_kern(&init_net,
                                 PF_PACKET,
                                 SOCK_RAW,
                                 htons(ETH_P_ALL),
                                 &pRaw->pSocket);
 
-      if ((rvalue >= 0) && (NULL != pRaw->pSocket)) {
+      if ((iRvalue >= 0) && (NULL != pRaw->pSocket)) {
         /* Need to reference our data structure */
         pRaw->pSocket->sk->sk_user_data = (void *)pRaw;
 
@@ -134,13 +134,13 @@ static void *privCreateRaw(char *pDevLabel)
         pRaw->pSocket->sk->sk_allocation = GFP_ATOMIC;
 
         /* Create recv queue, before setting callbacks */
-        init_waitqueue_head(&pRaw->recvQueue);
+        init_waitqueue_head(&pRaw->sRecvQueue);
 
         /* We need a semaphore. */
-        sema_init(&pRaw->sendWait, 1);
+        sema_init(&pRaw->sSendWait, 1);
 
         /* Copy the header information */
-        memcpy(pRaw->hdr.str, KLEM_NAME, 4);
+        memcpy(pRaw->hdr.pStr, KLEM_NAME, 4);
 
         /* Set the protocol type */
         pRaw->uProtocol = KLEM_PROTOCOL;
@@ -161,7 +161,7 @@ static void *privCreateRaw(char *pDevLabel)
         write_lock_bh(&pRaw->pSocket->sk->sk_callback_lock);
 
         /* Remember our orignal data ready function. */
-        pRaw->recvReady = pRaw->pSocket->sk->sk_data_ready;
+        pRaw->pRecvReady = pRaw->pSocket->sk->sk_data_ready;
 
         /* Our callback recv function. */
         pRaw->pSocket->sk->sk_data_ready = privRecvReady;
@@ -169,7 +169,7 @@ static void *privCreateRaw(char *pDevLabel)
         /* Resume any callbacks */
         write_unlock_bh(&pRaw->pSocket->sk->sk_callback_lock);
       } else {
-        KLEM_LOG("Error creating socket %s %d\n", pDevLabel, rvalue);
+        KLEM_LOG("Error creating socket %s %d\n", pDevLabel, iRvalue);
         kfree(pRaw);
         pRaw = NULL;
       }
@@ -194,13 +194,13 @@ static void privDestroyRaw(void *pPtr)
 
     if (NULL != pRaw->pSocket) {
       /* Wake up everyone, so they go away. */
-      wake_up_all(&pRaw->recvQueue);
+      wake_up_all(&pRaw->sRecvQueue);
 
       /* Halt any callback */
       write_lock_bh(&pRaw->pSocket->sk->sk_callback_lock);
 
       /* Set to orignal callback */
-      pRaw->pSocket->sk->sk_data_ready = pRaw->recvReady;
+      pRaw->pSocket->sk->sk_data_ready = pRaw->pRecvReady;
       pRaw->pSocket->sk->sk_user_data = NULL;
 
       /* Resume any callbacks */
@@ -221,10 +221,10 @@ static void privDestroyRaw(void *pPtr)
  */
 static unsigned int privSocketSend(void *pPtr,
                                    struct kvec *pVec,
-                                   unsigned int uVecLength,
-                                   unsigned int uDataLength,
+                                   unsigned int uiVecLength,
+                                   unsigned int uiDataLength,
                                    void *pName,
-                                   unsigned int uNameLength)
+                                   unsigned int uiNameLength)
 {
   raw_socket *pRaw = (raw_socket *)pPtr;
   struct msghdr mHdr;
@@ -239,10 +239,10 @@ static unsigned int privSocketSend(void *pPtr,
     memset(&mHdr, 0, sizeof(mHdr));
     mHdr.msg_flags = MSG_NOSIGNAL | MSG_DONTWAIT;
     mHdr.msg_name = pName;
-    mHdr.msg_namelen = uNameLength;
+    mHdr.msg_namelen = uiNameLength;
 
-    iError = kernel_sendmsg(pRaw->pSocket, &mHdr, pVec, uVecLength,
-                            uDataLength);
+    iError = kernel_sendmsg(pRaw->pSocket, &mHdr, pVec, uiVecLength,
+                            uiDataLength);
 
     if ((-EAGAIN == iError) || (-ENOBUFS == iError) || (-ENOSPC == iError)) {
       /* For these errors, lets sleep then try again. */
@@ -266,18 +266,18 @@ static unsigned int privSocketSend(void *pPtr,
 static int privRecvPoll(void *pPtr)
 {
   raw_socket *pRaw = (raw_socket *)pPtr;
-  int rvalue = 0;
+  int iRvalue = 0;
 
   if (NULL != pRaw) {
     if ((true == pRaw->bConnected) && (false == kthread_should_stop())) {
-      rvalue = skb_queue_len(&pRaw->pSocket->sk->sk_receive_queue);
+      iRvalue = skb_queue_len(&pRaw->pSocket->sk->sk_receive_queue);
     } else {
       /* Fake out, if were trying to disconnect, say we have something. */
-      rvalue = 1;
+      iRvalue = 1;
     }
   }
 
-  return rvalue;
+  return iRvalue;
 }
 
 /*
@@ -288,16 +288,16 @@ static void privRecvWait(void *pPtr)
   raw_socket *pRaw = (raw_socket *)pPtr;
 
   if (NULL != pRaw)  {
-    wait_event_interruptible(pRaw->recvQueue, (privRecvPoll(pPtr) > 0));
+    wait_event_interruptible(pRaw->sRecvQueue, (privRecvPoll(pPtr) > 0));
   }
 }
 
-static int privateRecvRawThread(void *pPtr)
+static int privRecvRawThread(void *pPtr)
 {
   raw_socket *pRaw = (raw_socket *)pPtr;
   struct sk_buff *pSkb = NULL;
   KLEM_RAW_HEADER *pHdr = NULL;
-  unsigned int uHdrLen = sizeof(KLEM_RAW_HEADER);
+  unsigned int uiHdrLen = sizeof(KLEM_RAW_HEADER);
 
   set_user_nice(current, -20);
 
@@ -318,16 +318,16 @@ static int privateRecvRawThread(void *pPtr)
         skb_orphan(pSkb);
 
         if (LEMU == pRaw->pData->eMode) {
-          if ((pSkb->len >= uHdrLen) && (0 == skb_linearize(pSkb))) {
+          if ((pSkb->len >= uiHdrLen) && (0 == skb_linearize(pSkb))) {
             /* Lets examine the incomming header */
             pHdr = (KLEM_RAW_HEADER *)pSkb->data;
 
             if (pRaw->uProtocol == ntohs(pHdr->uProtocol)) {
-              if (pRaw->hdr.ui == ntohl(pHdr->uHeader)) {
+              if (pRaw->hdr.uValue == ntohl(pHdr->uHeader)) {
                 if (pRaw->uVersion == ntohl(pHdr->uVersion)) {
 
                   /* remove the header */
-                  skb_pull(pSkb, uHdrLen);
+                  skb_pull(pSkb, uiHdrLen);
 
                   /* call the klem80211 side, to recv packet. */
                   klem80211Recv(pRaw->pData, pSkb);
@@ -379,7 +379,7 @@ void *klemNetConnect(void *pPtr, char *pDevLabel)
     snprintf(pRaw->pRecvName, sizeof(pRaw->pRecvName),
              "klem-%s-recv", pDevLabel);
     pRaw->pData = pData;
-    pTask = kthread_run(privateRecvRawThread, (void *)pRaw, "%s",
+    pTask = kthread_run(privRecvRawThread, (void *)pRaw, "%s",
                         pRaw->pRecvName);
     if (IS_ERR(pTask)) {
       KLEM_LOG("Failed to start recv thread %ld\n", PTR_ERR(pTask));
@@ -402,7 +402,7 @@ void klemNetDisconnect(void *pPtr)
     pRaw->bConnected = false;
 
     /* Wake everyone up */
-    wake_up_all(&pRaw->recvQueue);
+    wake_up_all(&pRaw->sRecvQueue);
     if (NULL != pRaw->pRecvThread) {
       kthread_stop((struct task_struct *)pRaw->pRecvThread);
       pRaw->pRecvThread = NULL;
@@ -415,18 +415,18 @@ void klemNetDisconnect(void *pPtr)
 /*
  * Send the contents of an sk_buff raw on a network device.
  */
-unsigned int klemTransmit(void *pPtr,
+unsigned int klemNetTransmit(void *pPtr,
                           struct sk_buff *pSkb,
-                          char *pHdr, unsigned int uHdrSize)
+                          char *pHdr, unsigned int uiHdrSize)
 {
   raw_socket *pRaw = (raw_socket *)pPtr;
   KLEM_RAW_HEADER khdr;
   struct sockaddr_ll llAddr;
   struct kvec sioVec [4];
-  unsigned int rvalue = 0;
-  unsigned int uError;
-  unsigned int uvloc = 0;
-  unsigned int uvsize = 0;
+  unsigned int uiRvalue = 0;
+  unsigned int uiError;
+  unsigned int uiVecLoc = 0;
+  unsigned int uiVecSize = 0;
 
   if (NULL != pRaw) {
     if (true == pRaw->bConnected) {
@@ -436,7 +436,7 @@ unsigned int klemTransmit(void *pPtr,
       }
 
       /* Take semaphore, but allow ourselves to be blocked. */
-      if (down_interruptible(&pRaw->sendWait)) {
+      if (down_interruptible(&pRaw->sSendWait)) {
         /* We got a bad signal, don't send anything. */
         return 0;
       }
@@ -450,19 +450,19 @@ unsigned int klemTransmit(void *pPtr,
 
         /* Setup the raw ethernet header */
         khdr.uProtocol = htons(pRaw->uProtocol);
-        khdr.uHeader = htonl(pRaw->hdr.ui);
+        khdr.uHeader = htonl(pRaw->hdr.uValue);
         khdr.uVersion = htonl(pRaw->uVersion);
 
         /* Point to the ethernet header + klem datagram stuff */
-        sioVec [uvloc].iov_base = (char *)&khdr;
-        sioVec [uvloc].iov_len = sizeof(KLEM_RAW_HEADER);
-        uvsize += sioVec [uvloc].iov_len;
-        uvloc++;
-        if ((NULL != pHdr) && (0 != uHdrSize)) {
-          sioVec [uvloc].iov_base = (char *)pHdr;
-          sioVec [uvloc].iov_len = uHdrSize;
-          uvsize += sioVec [uvloc].iov_len;
-          uvloc++;
+        sioVec [uiVecLoc].iov_base = (char *)&khdr;
+        sioVec [uiVecLoc].iov_len = sizeof(KLEM_RAW_HEADER);
+        uiVecSize += sioVec [uiVecLoc].iov_len;
+        uiVecLoc++;
+        if ((NULL != pHdr) && (0 != uiHdrSize)) {
+          sioVec [uiVecLoc].iov_base = (char *)pHdr;
+          sioVec [uiVecLoc].iov_len = uiHdrSize;
+          uiVecSize += sioVec [uiVecLoc].iov_len;
+          uiVecLoc++;
         }
       }
 
@@ -477,29 +477,29 @@ unsigned int klemTransmit(void *pPtr,
       memcpy(llAddr.sll_addr, pRaw->pLemuMac, ETH_ALEN);
 
       /* Now we need to point to our data in the sk_buffer */
-      sioVec [uvloc].iov_base = (char *)pSkb->data;
-      sioVec [uvloc].iov_len = pSkb->len;
-      uvsize += sioVec [uvloc].iov_len;
-      uvloc++;
+      sioVec [uiVecLoc].iov_base = (char *)pSkb->data;
+      sioVec [uiVecLoc].iov_len = pSkb->len;
+      uiVecSize += sioVec [uiVecLoc].iov_len;
+      uiVecLoc++;
 
       /* Do the work of sending that data. */
-      uError = privSocketSend(pPtr,
+      uiError = privSocketSend(pPtr,
                               sioVec,
-                              uvloc,
-                              uvsize,
+                              uiVecLoc,
+                              uiVecSize,
                               (void *)&llAddr,
                               sizeof(struct sockaddr_ll));
 
       /* Set the return value, if greater then 0, to the packet size */
-      if (uError > 0) {
-        rvalue = pSkb->len;
+      if (uiError > 0) {
+        uiRvalue = pSkb->len;
       } else {
-        rvalue = 0;
+        uiRvalue = 0;
       }
 
-      up(&pRaw->sendWait);
+      up(&pRaw->sSendWait);
     }
   }
 
-  return rvalue;
+  return uiRvalue;
 }

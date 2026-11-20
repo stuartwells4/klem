@@ -64,7 +64,7 @@ typedef struct klem_data {
   void *pMacData;
 
   /* What is our id */
-  unsigned int uDeviceId;
+  unsigned int uiDeviceId;
 
   /*
    * keep track of our filter.  This doesn't scale, consider
