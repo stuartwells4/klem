@@ -17,6 +17,7 @@
  *
  */
 #ifndef KLEM_PROC_INCLUDE
+#define KLEM_PROC_INCLUDE
 void klemProcInit(void *pPtr);
 void klemProcDeinit(void *pPtr);
 #endif

@@ -17,6 +17,10 @@
  *
  */
 #ifndef KLEM_NET_INCLUDE
+#define KLEM_NET_INCLUDE
+
+struct sk_buff;
+
 void *klemNetConnect(void *pPtr, char *pDevLabel);
 void klemNetDisconnect(void *pPtr);
 unsigned int klemTransmit(void *pPtr, 

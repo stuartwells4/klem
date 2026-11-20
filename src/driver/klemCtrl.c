@@ -23,10 +23,13 @@
 #include <linux/semaphore.h>
 #include <linux/interrupt.h>
 #include <linux/skbuff.h>
+#include <linux/slab.h>
+#include <linux/mutex.h>
 #include "klemData.h"
 #include "klemNet.h"
 #include "klemHdr.h"
 #include "klem80211.h"
+#include "klemCtrl.h"
 
 #include <linux/workqueue.h>
 
@@ -42,16 +45,16 @@ typedef struct {
 /* Tasklet for disconnect to be outside of interrupt context */
 static void privCtrlProcess(struct work_struct *pPtr)
 {
-  ctrl_data *pWork = (ctrl_data *)pPtr;
+  ctrl_data *pWork = container_of(pPtr, ctrl_data, ctrl_work_hdr);
   KLEMData *pData = NULL;
 
   KLEM_MSG("Entering work queue\n");
 
-  if (NULL != pWork) {
+  if (NULL != pPtr) {
     pData = pWork->pData;
 
     /* Lock the data structure */
-    spin_lock(&pData->sLock);
+    mutex_lock(&pData->sLock);
 
     switch(pWork->eCommand)
       {
@@ -79,11 +82,11 @@ static void privCtrlProcess(struct work_struct *pPtr)
         break;
       }
 
+    /* Unlock the data structure */
+    mutex_unlock(&pData->sLock);
+
     /* Free the work structure */
     kfree(pWork);
-
-    /* Unlock the data structure */
-    spin_unlock(&pData->sLock);
   }
 
   KLEM_MSG("Leaving work queue\n");
@@ -99,77 +102,50 @@ void klemCtrlCreate(void *pPtr)
 
 }
 
-void klemCtrlStart(void *pPtr)
+/*
+ * Queue a start/stop command onto the control work queue so the
+ * (sleeping) socket and radio setup happens outside the caller's context.
+ */
+static void privCtrlQueue(KLEMData *pData, int eCommand)
 {
-  KLEMData *pData = (KLEMData *)pPtr;
   ctrl_data *pWork = NULL;
-  mm_segment_t fsSet;
   int rvalue;
 
-  /* Set memory segment to kernel. */
-  fsSet = get_fs();
-  set_fs(KERNEL_DS);
-
-  pWork = (ctrl_data *)kmalloc(sizeof(ctrl_data), GFP_NOFS);
-
-  if (NULL != pWork) {
-    if (NULL != pData->pCtrlQueue)  {
-
-      INIT_WORK((struct work_struct *)pWork,
-                privCtrlProcess);
-      pWork->eCommand = CONNECTION_START;
-      pWork->pData = pData;
-      rvalue = queue_work(pData->pCtrlQueue,
-                          (struct work_struct *)pWork);
-      KLEM_LOG("work queued response %d\n", rvalue);
-    } else {
-      KLEM_MSG("work queue not active\n");
-      kfree(pWork);
-    }
+  if (NULL == pData->pCtrlQueue) {
+    KLEM_MSG("work queue not active\n");
+    return;
   }
 
-  /* Goto the orignal filesystem/memory */
-  set_fs(fsSet);
+  pWork = (ctrl_data *)kmalloc(sizeof(ctrl_data), GFP_KERNEL);
+
+  if (NULL != pWork) {
+    INIT_WORK(&pWork->ctrl_work_hdr, privCtrlProcess);
+    pWork->eCommand = eCommand;
+    pWork->pData = pData;
+    rvalue = queue_work(pData->pCtrlQueue, &pWork->ctrl_work_hdr);
+    KLEM_LOG("work queued response %d\n", rvalue);
+  }
+}
+
+void klemCtrlStart(void *pPtr)
+{
+  privCtrlQueue((KLEMData *)pPtr, CONNECTION_START);
 }
 
 void klemCtrlStop(void *pPtr)
 {
-  KLEMData *pData = (KLEMData *)pPtr;
-  ctrl_data *pWork = NULL;
-  mm_segment_t fsSet;
-  int rvalue;
-
-  /* Set memory segment to kernel. */
-  fsSet = get_fs();
-  set_fs(KERNEL_DS);
-
-  pWork = (ctrl_data *)kmalloc(sizeof(ctrl_data), GFP_NOFS);
-
-  if (NULL != pWork) {
-    if (NULL != pData->pCtrlQueue)  {
-
-      INIT_WORK((struct work_struct *)pWork,
-                privCtrlProcess);
-      pWork->eCommand = CONNECTION_STOP;
-      pWork->pData = pData;
-      rvalue = queue_work(pData->pCtrlQueue,
-                          (struct work_struct *)pWork);
-      KLEM_LOG("work queued response %d\n", rvalue);
-    } else {
-      KLEM_MSG("work queue not active\n");
-      kfree(pWork);
-    }
-  }
-
-  set_fs(fsSet);
+  privCtrlQueue((KLEMData *)pPtr, CONNECTION_STOP);
 }
 
 void klemCtrlDestroy(void *pPtr)
 {
   KLEMData *pData = (KLEMData *)pPtr;
 
-  flush_workqueue((struct workqueue_struct *)pData->pCtrlQueue);
-  destroy_workqueue((struct workqueue_struct *)pData->pCtrlQueue);
+  if (NULL != pData->pCtrlQueue) {
+    flush_workqueue((struct workqueue_struct *)pData->pCtrlQueue);
+    destroy_workqueue((struct workqueue_struct *)pData->pCtrlQueue);
+    pData->pCtrlQueue = NULL;
+  }
 
   /* Destroy the socket, if its still exists */
   if (NULL != pData->pRawSocket) {

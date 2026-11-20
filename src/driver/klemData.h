@@ -17,8 +17,10 @@
  *
  */
 #ifndef KLEM_DATA_INCLUDE
+#define KLEM_DATA_INCLUDE
 
 #include <linux/wait.h>
+#include <linux/mutex.h>
 
 #define KLEM_LOG(fmt, args...) printk("klem::%s "fmt, __func__, args)
 #define KLEM_MSG(fmt) printk("klem::%s "fmt, __func__)
@@ -36,8 +38,12 @@ typedef struct klem_data {
   /* The Node Number of the Link Emulation. */
   unsigned char ubNode;
 
-  /* Need a lock for our structure data */
-  spinlock_t sLock;
+  /*
+   * Lock for our structure data.  This is a mutex, not a spinlock,
+   * because the holders (proc writes and the control work queue)
+   * create sockets, threads and register the radio, all of which sleep.
+   */
+  struct mutex sLock;
 
   /* Information for the proc interface */
   struct {

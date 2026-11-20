@@ -23,6 +23,8 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/delay.h>
+#include <linux/device.h>
+#include <linux/err.h>
 
 #include "klemData.h"
 #include "klemHdr.h"
@@ -38,17 +40,24 @@ static int __init privKLEMInit(void)
    * This is where the driver will call functions to install
    * its functions.  Keep this area simple.
    */
-  int rvalue = 1;
+  int rvalue = -ENOMEM;
   KLEMData *pData = NULL;
 
   pData = klemDataInit();
 
   if (NULL != pData) {
     /* Lets create a class reference */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0))
+    pData->pClass = class_create("Wireless KLEM Driver");
+#else
     pData->pClass = class_create(THIS_MODULE, "Wireless KLEM Driver");
+#endif
     if (IS_ERR(pData->pClass)) {
       KLEM_MSG("Failed to get some class\n");
-      return 0;
+      rvalue = PTR_ERR(pData->pClass);
+      pData->pClass = NULL;
+      klemDataDeInit();
+      return rvalue;
     }
 
     /* Let the world know we loaded */
@@ -56,7 +65,7 @@ static int __init privKLEMInit(void)
     klemProcInit(pData);
     rvalue = 0;
   } else {
-    rvalue = 1;
+    rvalue = -ENOMEM;
   }
 
   if (0 == rvalue) {

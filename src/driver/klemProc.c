@@ -18,16 +18,18 @@
  */
 #include <linux/proc_fs.h>
 #include <linux/version.h>
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0))
 #include <linux/fs.h>
 #include <linux/seq_file.h>
-#endif
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
+#include <linux/mutex.h>
 
 #include "klemHdr.h"
 #include "klemData.h"
 #include "klemCtrl.h"
 #include "klem80211.h"
+#include "klemProc.h"
 
 /* String information for starting/stopping the system. */
 #define COMMAND_STR "command"
@@ -54,102 +56,6 @@
 /*
  * Interface to send information to the proc file system.
  */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,11,0))
-
-static int privProcOutput(char *pKernBuf,
-			  char **ppIgnore,
-			  off_t iKernOffset,
-			  int iKernLen,
-			  int *pEOF,
-			  void *pPtr)
-{
-  KLEMData *pData = (KLEMData *)pPtr;
-  char *pOutput = pData->proc.pBuffer + iKernOffset;
-  int iOutLen = pData->proc.iSize - iKernOffset;
-  int rvalue = 0;
-  int loop;
-  int ufnum = 0;
-
-  spin_lock(&pData->sLock);
-
-  if (0 == iKernOffset) {
-
-    sprintf(pOutput, "KLEM Proc Interface\n\n");
-    pOutput += strlen(pOutput);
-
-    sprintf(pOutput, "Version:              %d\n", pData->uiVersion);
-    pOutput += strlen(pOutput);
-
-    sprintf(pOutput, "raw-device:           %s\n", pData->pDevName);
-    pOutput += strlen(pOutput);
-
-    if (NULL != pData->pRawSocket) {
-      sprintf(pOutput, "raw-socket:           %p\n", pData->pRawSocket);
-    } else {
-      sprintf(pOutput, "raw-socket:           null\n");
-    }
-    pOutput += strlen(pOutput);
-
-    if (NULL != pData->pNetLink) {
-      sprintf(pOutput, "netlink:              %p\n", pData->pNetLink);
-    } else {
-      sprintf(pOutput, "netlink:              null\n");
-    }
-    pOutput += strlen(pOutput);
-
-    sprintf(pOutput, "device-id:            %d\n", pData->uDeviceId);
-    pOutput += strlen(pOutput);
-
-    if (LEMU == pData->eMode) {
-      sprintf(pOutput, "device-id:            lemu\n");
-    } else {
-      sprintf(pOutput, "device-id:            bridge\n");
-    }
-    pOutput += strlen(pOutput);
-
-    ufnum = 0;
-    sprintf(pOutput, "filter:               ");
-    pOutput += strlen(pOutput);
-    for (loop = 0; loop < MAX_WIRELESS_NODE; loop++) {
-      if (true == pData->bFilterNode [loop]) {
-        sprintf(pOutput, "%03d ", loop);
-        pOutput += strlen(pOutput);
-        ufnum += 1;
-        if ((0 != ufnum) && (0 == ufnum % 8)) {
-          sprintf(pOutput, "\nfilter:               ");
-          pOutput += strlen(pOutput);
-        }
-      }
-    }
-
-    sprintf(pOutput, "\n");
-    pOutput += strlen(pOutput);
-
-    /* Printout wireless emulation data */
-    pOutput += klem80211Proc(pData, pOutput);
-
-    pOutput = pData->proc.pBuffer;
-    pData->proc.iSize = strlen(pOutput);
-    iOutLen = pData->proc.iSize;
-  }
-
-  if (iOutLen < iKernLen) {
-    memcpy(pKernBuf, pOutput, iOutLen);
-    rvalue = iOutLen;
-    *pEOF = 0;
-  } else {
-    memcpy(pKernBuf, pOutput, iKernLen);
-    rvalue = iOutLen - iKernLen;
-    *pEOF = 0;
-  }
-
-  spin_unlock(&pData->sLock);
-
-  return rvalue;
-}
-
-#else
-
 /* String information for starting/stopping the system. */
 static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
 {
@@ -161,6 +67,7 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
     pData = (KLEMData *)pOutput->private;
 
     if (NULL != pData) {
+      mutex_lock(&pData->sLock);
       seq_printf(pOutput, "KLEM Proc Interface\n\n");
       seq_printf(pOutput, "Version:              %d\n", pData->uiVersion);
       seq_printf(pOutput, "raw-device:           %s\n", pData->pDevName);
@@ -201,12 +108,12 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
 
       /* Printout wireless emulation data */
       klem80211Proc(pData, pOutput);
+      mutex_unlock(&pData->sLock);
     }
   }
 
   return 0;
 }
-#endif
 
 /*
  * Interface to recv information from the proc file system.
@@ -216,7 +123,7 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
  * This routine is not secure.  Remove if you care about security.
  */
 static int privProcInput(struct file *pFile,
-			 const char __user *pUserBuf,
+			 const char *pUserBuf,
 			 unsigned long uiCount,
 			 void *pMyData)
 {
@@ -229,16 +136,12 @@ static int privProcInput(struct file *pFile,
   bool bParse = false;
   unsigned int loop = 0;
   unsigned int utmp;
-  mm_segment_t mSegment;
 
-  mSegment = get_fs();
-  set_fs(KERNEL_DS);
-
-  spin_lock(&pData->sLock);
+  mutex_lock(&pData->sLock);
 
   /* Look for command = values, and act upon it. */
   loop = 0;
-  while (loop < strlen(pUserBuf)) {
+  while (loop < uiCount) {
     switch(pUserBuf [loop])
       {
       case ' ':
@@ -289,7 +192,7 @@ static int privProcInput(struct file *pFile,
           strncpy(pData->pDevName, pValue, iValueLen);
         }
       } else if (strncmp(pCommand, ID_STR, iCommandLen) == 0) {
-        utmp = (unsigned int)simple_strtol(pValue, NULL, 10);
+        utmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
         if (utmp >= MAX_WIRELESS_NODE) {
           pData->uDeviceId = 0;
           KLEM_LOG("Error, device id %s must be beteen 0-255\n",
@@ -298,7 +201,7 @@ static int privProcInput(struct file *pFile,
           pData->uDeviceId = utmp;
         }
       } else if (strncmp(pCommand, FILTER_STR, iCommandLen) == 0) {
-        utmp = (unsigned int)simple_strtol(pValue, NULL, 10);
+        utmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
         if (utmp >= MAX_WIRELESS_NODE) {
           KLEM_LOG("Error, filter id %s must be beteen 0-255\n",
                    pValue);
@@ -306,7 +209,7 @@ static int privProcInput(struct file *pFile,
           pData->bFilterNode [utmp] = true;
         }
       } else if (strncmp(pCommand, ACCEPT_STR, iCommandLen) == 0) {
-        utmp = (unsigned int)simple_strtol(pValue, NULL, 10);
+        utmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
         if (utmp >= MAX_WIRELESS_NODE) {
           KLEM_LOG("Error, accept id %s must be beteen 0-255\n",
                    pValue);
@@ -332,51 +235,58 @@ static int privProcInput(struct file *pFile,
     loop += 1;
   }
 
-  spin_unlock(&pData->sLock);
-  set_fs(mSegment);
+  mutex_unlock(&pData->sLock);
 
   return uiCount;
 }
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0))
-
 static ssize_t privProcInputSeq(struct file *pFile,
 				const char __user *pBuffer,
 				size_t iCount,
 				loff_t *pPos)
 {
   void *pData = NULL;
-  size_t rvalue = 0;
+  char *pKernBuf = NULL;
+  ssize_t rvalue = 0;
 
-  if (NULL != pFile) {
-    if (NULL != pBuffer) {
-      if (iCount > 0) {
-	pData = klemGetData();
-	rvalue = privProcInput(pFile, pBuffer, iCount, pData);
-      }
+  if ((NULL != pFile) && (NULL != pBuffer) && (iCount > 0)) {
+    /* Commands are short, a page is plenty. */
+    if (iCount > PAGE_SIZE) {
+      iCount = PAGE_SIZE;
     }
+
+    /* Copy the user data into kernel memory, nul terminated. */
+    pKernBuf = memdup_user_nul(pBuffer, iCount);
+    if (IS_ERR(pKernBuf)) {
+      return PTR_ERR(pKernBuf);
+    }
+
+    pData = klemGetData();
+    if (NULL != pData) {
+      privProcInput(pFile, pKernBuf, strlen(pKernBuf), pData);
+    }
+    kfree(pKernBuf);
+    rvalue = iCount;
   }
 
   return rvalue;
 }
 
-#endif
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0))
-
 static int privProcOpen(struct inode *pINode, struct file *pFile)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0))
+  return single_open(pFile, privProcOutputSeq, pde_data(pINode));
+#else
   return single_open(pFile, privProcOutputSeq, PDE_DATA(pINode));
+#endif
 }
 
-static const struct file_operations priv_proc_fops = {
-  .owner   = THIS_MODULE,
-  .open    = privProcOpen,
-  .read    = seq_read,
-  .write   = privProcInputSeq,
-  .llseek  = seq_lseek,
-  .release = single_release,
+static const struct proc_ops priv_proc_ops = {
+  .proc_open    = privProcOpen,
+  .proc_read    = seq_read,
+  .proc_write   = privProcInputSeq,
+  .proc_lseek   = seq_lseek,
+  .proc_release = single_release,
 };
-#endif
 
 /* Proc entry point */
 void klemProcInit(void *pPtr)
@@ -384,26 +294,15 @@ void klemProcInit(void *pPtr)
   KLEMData *pData = (KLEMData *)pPtr;
 
   if (NULL != pData) {
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,11,0))
-    pData->proc.pEntry = create_proc_read_entry(KLEM_NAME,
-                                                0644,
-                                                NULL,
-                                                privProcOutput,
-                                                pPtr);
-
-    if (NULL == pData->proc.pEntry) {
-      KLEM_LOG("Failed to create proc read entry %s\n", KLEM_NAME);
-    } else {
-      pData->proc.pEntry->write_proc = privProcInput;
-    }
-#else
     pData->proc.pEntry = proc_create_data(KLEM_NAME,
 					  0644,
 					  NULL,
-					  &priv_proc_fops,
+					  &priv_proc_ops,
 					  pPtr);
 
-#endif
+    if (NULL == pData->proc.pEntry) {
+      KLEM_LOG("Failed to create proc entry %s\n", KLEM_NAME);
+    }
   }
 }
 
