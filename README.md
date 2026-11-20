@@ -3,7 +3,7 @@ klem
 
 Wireless 802.11 Linux Kernel Link Emulation
 
-(Last tested on Kernel 3.19.0.52 for Ubutnu 14.03)
+(Builds on Ubuntu 24.04 kernels 6.8, 6.11, 6.14 and 6.17 and on Ubuntu 22.04 kernel 5.15. Kernel 5.15 is the oldest supported version.)
 
 KLEM is a virtual wireless 802.11 network driver that connects devices together using Kernel Link EMulation.
 
@@ -81,6 +81,23 @@ The klem.ko driver will be built in this directory.
 If your kernel sources are in an alternative directory, setting the KERNELDIR variable will indicate to make where to look for the required files.
 
     #make KERNELDIR=/usr/foo/kernel
+
+On Ubuntu 24.04 install the build prerequisites first:
+
+    #sudo apt install build-essential linux-headers-$(uname -r)
+
+The iwconfig/ifconfig commands used above come from the wireless-tools and
+net-tools packages, which are no longer installed by default.  The iw and ip
+equivalents work as well, for example:
+
+    #iw dev wlan0 set type ibss
+    #ip link set wlan0 up
+    #iw dev wlan0 ibss join klem 2412
+    #ip addr add x.x.x.x/24 dev wlan0
+
+If Secure Boot is enabled, the kernel will refuse to load an unsigned klem.ko.
+Either sign the module with a key enrolled through mokutil, or disable Secure
+Boot validation.
 
 
 

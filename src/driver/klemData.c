@@ -28,7 +28,7 @@ void *klemDataInit(void)
 {
   KLEMData *pData = NULL;
 
-  pLocalData = kmalloc(sizeof(KLEMData), GFP_KERNEL);
+  pLocalData = kzalloc(sizeof(KLEMData), GFP_KERNEL);
   pData = pLocalData;
   if (NULL != pData) {
     /* Make sure we set everything to zero */
@@ -45,8 +45,8 @@ void *klemDataInit(void)
     pData->eMode = LEMU;
     pData->pClass = NULL;
 
-    /* We need a spin lock for calls from interrupts to lock data structure */
-    spin_lock_init(&pData->sLock);
+    /* Lock protecting the data structure (process context only). */
+    mutex_init(&pData->sLock);
 
     KLEM_LOG("malloc internal data at %p\n", pData);
   } else {
