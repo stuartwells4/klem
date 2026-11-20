@@ -21,7 +21,7 @@ The KLEM driver wraps each wireless 802.11 frame with the following specialized 
      Length     Description             Value
 
      6 bytes    Destination MAC         0xffffffffffff (Broadcast)
-     6 bytes    Source MAC              MAC of virtual wireless device
+     6 bytes    Source MAC              MAC of the sender’s wired interface (e.g. eth0)
      2 bytes    Protocol                0xdead
      4 bytes    Header                  “melk” (0x6d656c6b)
      4 bytes    Version                 1
