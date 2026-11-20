@@ -17,8 +17,8 @@
  *
  */
 
-#ifndef KLEM80211_INCLUDE
-#define KLEM80211_INCLUDE
+#ifndef KLEM_80211_INCLUDE
+#define KLEM_80211_INCLUDE
 #include <linux/version.h>
 
 struct seq_file;

@@ -98,7 +98,7 @@ void klemCtrlCreate(void *pPtr)
 {
   KLEMData *pData = (KLEMData *)pPtr;
 
-  pData->pCtrlQueue = (void *)create_workqueue(KELM_CONTROL);
+  pData->pCtrlQueue = (void *)create_workqueue(KLEM_CONTROL);
 
 }
 
@@ -109,7 +109,7 @@ void klemCtrlCreate(void *pPtr)
 static void privCtrlQueue(KLEMData *pData, int eCommand)
 {
   ctrl_data *pWork = NULL;
-  int rvalue;
+  int iRvalue;
 
   if (NULL == pData->pCtrlQueue) {
     KLEM_MSG("work queue not active\n");
@@ -122,8 +122,8 @@ static void privCtrlQueue(KLEMData *pData, int eCommand)
     INIT_WORK(&pWork->ctrl_work_hdr, privCtrlProcess);
     pWork->eCommand = eCommand;
     pWork->pData = pData;
-    rvalue = queue_work(pData->pCtrlQueue, &pWork->ctrl_work_hdr);
-    KLEM_LOG("work queued response %d\n", rvalue);
+    iRvalue = queue_work(pData->pCtrlQueue, &pWork->ctrl_work_hdr);
+    KLEM_LOG("work queued response %d\n", iRvalue);
   }
 }
 

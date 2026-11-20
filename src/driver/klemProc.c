@@ -60,8 +60,8 @@
 static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
 {
   KLEMData *pData;
-  int loop;
-  int ufnum = 0;
+  int iLoop;
+  int iFilterNum = 0;
 
   if (NULL != pOutput) {
     pData = (KLEMData *)pOutput->private;
@@ -84,7 +84,7 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
 	seq_printf(pOutput, "netlink:              null\n");
       }
 
-      seq_printf(pOutput, "device-id:            %d\n", pData->uDeviceId);
+      seq_printf(pOutput, "device-id:            %d\n", pData->uiDeviceId);
 
       if (LEMU == pData->eMode) {
 	seq_printf(pOutput, "device-id:            lemu\n");
@@ -92,13 +92,13 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
 	seq_printf(pOutput, "device-id:            bridge\n");
       }
 
-      ufnum = 0;
+      iFilterNum = 0;
       seq_printf(pOutput, "filter:               ");
-      for (loop = 0; loop < MAX_WIRELESS_NODE; loop++) {
-	if (true == pData->bFilterNode [loop]) {
-	  seq_printf(pOutput, "%03d ", loop);
-	  ufnum += 1;
-	  if ((0 != ufnum) && (0 == ufnum % 8)) {
+      for (iLoop = 0; iLoop < MAX_WIRELESS_NODE; iLoop++) {
+	if (true == pData->bFilterNode [iLoop]) {
+	  seq_printf(pOutput, "%03d ", iLoop);
+	  iFilterNum += 1;
+	  if ((0 != iFilterNum) && (0 == iFilterNum % 8)) {
 	    seq_printf(pOutput, "\nfilter:               ");
 	  }
 	}
@@ -124,25 +124,25 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
  */
 static int privProcInput(struct file *pFile,
 			 const char *pUserBuf,
-			 unsigned long uiCount,
+			 unsigned long uCount,
 			 void *pMyData)
 {
   KLEMData *pData = (KLEMData *)pMyData;
   const char *pCommand = NULL;
-  unsigned int iCommandLen = 0;
+  unsigned int uiCommandLen = 0;
   const char *pValue = NULL;
-  unsigned int iValueLen = 0;
+  unsigned int uiValueLen = 0;
   bool bCommand = true;
   bool bParse = false;
-  unsigned int loop = 0;
-  unsigned int utmp;
+  unsigned int uiLoop = 0;
+  unsigned int uiTmp;
 
   mutex_lock(&pData->sLock);
 
   /* Look for command = values, and act upon it. */
-  loop = 0;
-  while (loop < uiCount) {
-    switch(pUserBuf [loop])
+  uiLoop = 0;
+  while (uiLoop < uCount) {
+    switch(pUserBuf [uiLoop])
       {
       case ' ':
       case '\r':
@@ -160,19 +160,19 @@ static int privProcInput(struct file *pFile,
       default:
         /* did we find a command */
         if ((NULL == pCommand) && (true == bCommand)) {
-          pCommand = &pUserBuf [loop];
+          pCommand = &pUserBuf [uiLoop];
         }
 
         /* Did we find a value */
         if ((NULL == pValue) && (false == bCommand)) {
-          pValue = &pUserBuf [loop];
+          pValue = &pUserBuf [uiLoop];
         }
 
         /* Determine the length of this string run. */
         if (true == bCommand) {
-          iCommandLen += 1;
+          uiCommandLen += 1;
         } else {
-          iValueLen += 1;
+          uiValueLen += 1;
         }
         break;
       }
@@ -180,82 +180,82 @@ static int privProcInput(struct file *pFile,
     /* Should parsing those command = values */
     if ((NULL != pCommand) && (NULL != pValue) && (true == bParse)) {
       /* Do we have a command */
-      if (strncmp(pCommand, COMMAND_STR, iCommandLen) == 0) {
-        if (strncmp(pValue, COMMAND_START_STR, iValueLen) == 0) {
+      if (strncmp(pCommand, COMMAND_STR, uiCommandLen) == 0) {
+        if (strncmp(pValue, COMMAND_START_STR, uiValueLen) == 0) {
           klemCtrlStart(pData);
-        } else if (strncmp(pValue, COMMAND_STOP_STR, iValueLen) == 0) {
+        } else if (strncmp(pValue, COMMAND_STOP_STR, uiValueLen) == 0) {
           klemCtrlStop(pData);
         }
-      } else if (strncmp(pCommand, DEVICE_STR, iCommandLen) == 0) {
-        if (iValueLen < sizeof(pData->pDevName)) {
+      } else if (strncmp(pCommand, DEVICE_STR, uiCommandLen) == 0) {
+        if (uiValueLen < sizeof(pData->pDevName)) {
           memset(pData->pDevName, 0, sizeof(pData->pDevName));
-          strncpy(pData->pDevName, pValue, iValueLen);
+          strncpy(pData->pDevName, pValue, uiValueLen);
         }
-      } else if (strncmp(pCommand, ID_STR, iCommandLen) == 0) {
-        utmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
-        if (utmp >= MAX_WIRELESS_NODE) {
-          pData->uDeviceId = 0;
+      } else if (strncmp(pCommand, ID_STR, uiCommandLen) == 0) {
+        uiTmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
+        if (uiTmp >= MAX_WIRELESS_NODE) {
+          pData->uiDeviceId = 0;
           KLEM_LOG("Error, device id %s must be beteen 0-255\n",
                    pValue);
         } else {
-          pData->uDeviceId = utmp;
+          pData->uiDeviceId = uiTmp;
         }
-      } else if (strncmp(pCommand, FILTER_STR, iCommandLen) == 0) {
-        utmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
-        if (utmp >= MAX_WIRELESS_NODE) {
+      } else if (strncmp(pCommand, FILTER_STR, uiCommandLen) == 0) {
+        uiTmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
+        if (uiTmp >= MAX_WIRELESS_NODE) {
           KLEM_LOG("Error, filter id %s must be beteen 0-255\n",
                    pValue);
         } else {
-          pData->bFilterNode [utmp] = true;
+          pData->bFilterNode [uiTmp] = true;
         }
-      } else if (strncmp(pCommand, ACCEPT_STR, iCommandLen) == 0) {
-        utmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
-        if (utmp >= MAX_WIRELESS_NODE) {
+      } else if (strncmp(pCommand, ACCEPT_STR, uiCommandLen) == 0) {
+        uiTmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
+        if (uiTmp >= MAX_WIRELESS_NODE) {
           KLEM_LOG("Error, accept id %s must be beteen 0-255\n",
                    pValue);
         } else {
-          pData->bFilterNode [utmp] = false;
+          pData->bFilterNode [uiTmp] = false;
         }
-      } else if (strncmp(pCommand, MODE_STR, iCommandLen) == 0) {
-        if (strncmp(pValue, MODE_LEMU_STR, iValueLen) == 0) {
+      } else if (strncmp(pCommand, MODE_STR, uiCommandLen) == 0) {
+        if (strncmp(pValue, MODE_LEMU_STR, uiValueLen) == 0) {
           pData->eMode = LEMU;
-        } else if (strncmp(pValue, MODE_BRIDGE_STR, iValueLen) == 0) {
+        } else if (strncmp(pValue, MODE_BRIDGE_STR, uiValueLen) == 0) {
           pData->eMode = BRIDGE;
         }
       }
       pCommand = NULL;
       pValue = NULL;
-      iCommandLen = 0;
-      iValueLen = 0;
+      uiCommandLen = 0;
+      uiValueLen = 0;
       bCommand = false;
       bParse = false;
     }
 
     bParse = false;
-    loop += 1;
+    uiLoop += 1;
   }
 
   mutex_unlock(&pData->sLock);
 
-  return uiCount;
+  return uCount;
 }
 static ssize_t privProcInputSeq(struct file *pFile,
 				const char __user *pBuffer,
-				size_t iCount,
+				size_t uCount,
 				loff_t *pPos)
 {
   void *pData = NULL;
   char *pKernBuf = NULL;
-  ssize_t rvalue = 0;
+  ssize_t iRvalue = 0;
 
-  if ((NULL != pFile) && (NULL != pBuffer) && (iCount > 0)) {
+  if ((NULL != pFile) && (NULL != pBuffer) && (uCount > 0)) {
     /* Commands are short, a page is plenty. */
-    if (iCount > PAGE_SIZE) {
-      iCount = PAGE_SIZE;
+    if (uCount > PAGE_SIZE) {
+      uCount = PAGE_SIZE;
     }
 
     /* Copy the user data into kernel memory, nul terminated. */
-    pKernBuf = memdup_user_nul(pBuffer, iCount);
+    pKernBuf = memdup_user_nul(pBuffer, uCount);
     if (IS_ERR(pKernBuf)) {
       return PTR_ERR(pKernBuf);
     }
@@ -265,10 +265,10 @@ static ssize_t privProcInputSeq(struct file *pFile,
       privProcInput(pFile, pKernBuf, strlen(pKernBuf), pData);
     }
     kfree(pKernBuf);
-    rvalue = iCount;
+    iRvalue = uCount;
   }
 
-  return rvalue;
+  return iRvalue;
 }
 
 static int privProcOpen(struct inode *pINode, struct file *pFile)
@@ -280,7 +280,7 @@ static int privProcOpen(struct inode *pINode, struct file *pFile)
 #endif
 }
 
-static const struct proc_ops priv_proc_ops = {
+static const struct proc_ops privConstProcOps = {
   .proc_open    = privProcOpen,
   .proc_read    = seq_read,
   .proc_write   = privProcInputSeq,
@@ -297,7 +297,7 @@ void klemProcInit(void *pPtr)
     pData->proc.pEntry = proc_create_data(KLEM_NAME,
 					  0644,
 					  NULL,
-					  &priv_proc_ops,
+					  &privConstProcOps,
 					  pPtr);
 
     if (NULL == pData->proc.pEntry) {

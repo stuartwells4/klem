@@ -410,7 +410,7 @@ typedef struct {
   bool bIdle;
   unsigned long uBeacons;
   unsigned long uBeaconCount;
-  char devName [64];
+  char pDevName [64];
   struct mac_address  macAddress;
 
   /* Structures for band, channel and rates for 2GHZ */
@@ -435,10 +435,10 @@ typedef struct {
   /* qos queues */
   struct qos_info {
     /* information on how to transmit the packet.  For now keep, but ignore */
-    u8 aifs;
-    u16 cw_min;
-    u16 cw_max;
-    u16 txop;
+    u8 uAifs;
+    u16 uCwMin;
+    u16 uCwMax;
+    u16 uTxop;
 
     /* Debugging, keep track of packets sent, error*/
     unsigned long uRecvNumber;
@@ -448,7 +448,7 @@ typedef struct {
 
     /* Queue information for transitting a packet */
     struct sk_buff_head listSkb;
-    unsigned int uListDepth;
+    unsigned int uiListDepth;
     bool bListActive;
   } qos [KLEM_MAX_QOS];
 } mac80211Data;
@@ -497,24 +497,24 @@ static int privConfig(struct ieee80211_hw *pHW, int iRadioIdx, u32 uChanged);
 static int privConfig(struct ieee80211_hw *pHW, u32 uChanged);
 #endif
 static void privConfigureFilter(struct ieee80211_hw *pHW,
-                unsigned int uCchangedFlags,
-                unsigned int *puTotalFlags,
+                unsigned int uiChFlags,
+                unsigned int *pTotalFlags,
                 u64 uMulticast);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,0,0))
 static int privConfigureTX(struct ieee80211_hw *pHW,
                struct ieee80211_vif *pVIF,
-               unsigned int uLinkId,
-               u16 uiQueue,
+               unsigned int uiLinkId,
+               u16 uQueue,
                const struct ieee80211_tx_queue_params *pQueue);
 #else
 static int privConfigureTX(struct ieee80211_hw *pHW,
                struct ieee80211_vif *pVIF,
-               u16 uiQueue,
+               u16 uQueue,
                const struct ieee80211_tx_queue_params *pQueue);
 #endif
 static void privCompleteTX(void *pPtr, struct sk_buff *pSkb, bool bAck);
 
-static const struct ieee80211_ops privKlem80211OPS =
+static const struct ieee80211_ops privConstKlem80211OPS =
 {
   /* routines to add/stop mac 802.11 radio */
   .start = privStart,
@@ -541,7 +541,7 @@ static const struct ieee80211_ops privKlem80211OPS =
   .conf_tx = privConfigureTX,
 };
 
-static struct device_driver klem80211Driver = {
+static struct device_driver localDriver = {
   .name = "klem-mac80211"
 };
 
@@ -719,7 +719,7 @@ static inline void privCommonTX(struct ieee80211_hw *pHW, struct sk_buff *pSkb)
 {
   mac80211Data *pMacData = (mac80211Data *)pHW->priv;
   struct ieee80211_hdr *pHdr = NULL;
-  unsigned int uqos = 0;
+  unsigned int uiQos = 0;
   unsigned long uSigFlags;
 
   if ((NULL != pMacData) && (NULL != pSkb)) {
@@ -732,31 +732,31 @@ static inline void privCommonTX(struct ieee80211_hw *pHW, struct sk_buff *pSkb)
 
         /* Determine the qos mapping */
         if (ieee80211_is_data_qos(pHdr->frame_control)) {
-          uqos = skb_get_queue_mapping(pSkb);
+          uiQos = skb_get_queue_mapping(pSkb);
         }
 
         /*
          * Assuming we have a valid qos, enqueue the packet onto our
          * fake hardware.
          */
-        if (uqos < KLEM_MAX_QOS) {
+        if (uiQos < KLEM_MAX_QOS) {
           spin_lock_irqsave(&pMacData->sSpinLock, uSigFlags);
 
-          if (pMacData->qos [uqos].uListDepth < KLEM_QUEUE_MAX) {
-            skb_queue_tail(&pMacData->qos [uqos].listSkb,
+          if (pMacData->qos [uiQos].uiListDepth < KLEM_QUEUE_MAX) {
+            skb_queue_tail(&pMacData->qos [uiQos].listSkb,
                            pSkb);
-            pMacData->qos [uqos].uListDepth++;
+            pMacData->qos [uiQos].uiListDepth++;
             /* Check to see if are close to high water mark for queue storage.*/
-            if (pMacData->qos [uqos].uListDepth >= KLEM_QUEUE_HIGH) {
-              if (true == pMacData->qos [uqos].bListActive) {
+            if (pMacData->qos [uiQos].uiListDepth >= KLEM_QUEUE_HIGH) {
+              if (true == pMacData->qos [uiQos].bListActive) {
                 /* Mainly due this, so a network issue don't consume all mem */
-                pMacData->qos [uqos].bListActive = false;
-                ieee80211_stop_queue(pMacData->pHW, uqos);
+                pMacData->qos [uiQos].bListActive = false;
+                ieee80211_stop_queue(pMacData->pHW, uiQos);
               }
             }
           } else {
             /* Our fake hardware ran out of storage space, drop packet */
-            pMacData->qos [uqos].uSendDroppedNumber++;
+            pMacData->qos [uiQos].uSendDroppedNumber++;
             spin_unlock_irqrestore(&pMacData->sSpinLock, uSigFlags);
             ieee80211_free_txskb(pHW, pSkb);
             return;
@@ -819,7 +819,7 @@ static int privConfig(struct ieee80211_hw *pHW, u32 uChanged)
  * pass al multicast frames
  */
 static void privConfigureFilter(struct ieee80211_hw *pHW,
-                unsigned int uChFlags,
+                unsigned int uiChFlags,
                 unsigned int *pTotalFlags,
                 u64 uMcast)
 {
@@ -828,8 +828,8 @@ static void privConfigureFilter(struct ieee80211_hw *pHW,
   if ((NULL != pMacData) && (NULL != pTotalFlags)) {
     *pTotalFlags &= FIF_ALLMULTI;
   } else {
-    KLEM_LOG("Error pHW (%p) uChFlags (%d) pTotalFlags (%p) uMcast (%lld)\n",
-         pHW, uChFlags, pTotalFlags, uMcast);
+    KLEM_LOG("Error pHW (%p) uiChFlags (%d) pTotalFlags (%p) uMcast (%lld)\n",
+         pHW, uiChFlags, pTotalFlags, uMcast);
 
   }
 }
@@ -837,7 +837,7 @@ static void privConfigureFilter(struct ieee80211_hw *pHW,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,0,0))
 static int privConfigureTX(struct ieee80211_hw *pHW,
                struct ieee80211_vif *pVIF,
-               unsigned int uLinkId,
+               unsigned int uiLinkId,
                u16 uQueue,
                const struct ieee80211_tx_queue_params *pQueue)
 #else
@@ -854,10 +854,10 @@ static int privConfigureTX(struct ieee80211_hw *pHW,
       pMacData = (mac80211Data *)pHW->priv;
 
       /* Remember the qos setup */
-      pMacData->qos [uQueue].aifs = pQueue->aifs;
-      pMacData->qos [uQueue].cw_min = pQueue->cw_min;
-      pMacData->qos [uQueue].cw_max = pQueue->cw_max;
-      pMacData->qos [uQueue].txop = pQueue->txop;
+      pMacData->qos [uQueue].uAifs = pQueue->aifs;
+      pMacData->qos [uQueue].uCwMin = pQueue->cw_min;
+      pMacData->qos [uQueue].uCwMax = pQueue->cw_max;
+      pMacData->qos [uQueue].uTxop = pQueue->txop;
 
       KLEM_LOG("qos = %d, aifs = %d, cw_min = %d, cw_max = %d, txop = %d\n",
            uQueue,
@@ -875,30 +875,30 @@ static int privConfigureTX(struct ieee80211_hw *pHW,
 static int privQueuePoll(void *pPtr)
 {
   mac80211Data *pMacData = (mac80211Data *)pPtr;
-  int rvalue = KLEM_MAX_QOS;
+  int iRvalue = KLEM_MAX_QOS;
   unsigned long uSigFlags;
-  unsigned int loop;
+  unsigned int uiLoop;
 
   if (NULL != pMacData) {
     if (true == pMacData->bActive) {
       spin_lock_irqsave(&pMacData->sSpinLock, uSigFlags);
-      for (loop = 0; loop < KLEM_MAX_QOS; loop++) {
-        if (skb_queue_len(&pMacData->qos [loop].listSkb) > 0) {
-          rvalue = loop;
+      for (uiLoop = 0; uiLoop < KLEM_MAX_QOS; uiLoop++) {
+        if (skb_queue_len(&pMacData->qos [uiLoop].listSkb) > 0) {
+          iRvalue = uiLoop;
           break;
         }
       }
       spin_unlock_irqrestore(&pMacData->sSpinLock, uSigFlags);
     } else {
-      rvalue = 0;
+      iRvalue = 0;
     }
   }
 
-  return rvalue;
+  return iRvalue;
 }
 
 /* Quick function to transmit a beacon */
-static void privBeaconTX(void *pPtr, u8 *mac,
+static void privBeaconTX(void *pPtr, u8 *pMac,
           struct ieee80211_vif *pVIF)
 {
   struct ieee80211_hw *pHW = (struct ieee80211_hw *)pPtr;
@@ -923,12 +923,12 @@ static void privBeaconTX(void *pPtr, u8 *mac,
           sTapHdr.uFrequency =
             htonl((u32)pMacData->pHW->conf.chandef.chan->center_freq);
           sTapHdr.uPower = htonl((u32)pMacData->pHW->conf.power_level);
-          sTapHdr.uId = htonl((u32)pData->uDeviceId);
+          sTapHdr.uId = htonl((u32)pData->uiDeviceId);
 
-          klemTransmit(pData->pRawSocket, pSkb,
+          klemNetTransmit(pData->pRawSocket, pSkb,
                        (char *)&sTapHdr, sizeof(KLEM_TAP_HEADER));
         } else {
-          klemTransmit(pData->pRawSocket, pSkb,
+          klemNetTransmit(pData->pRawSocket, pSkb,
                        NULL, 0);
         }
         pMacData->uBeaconCount++;
@@ -976,47 +976,47 @@ static int privSendRawThread(void *pPtr)
 {
   mac80211Data *pMacData = (mac80211Data *)pPtr;
   KLEMData *pData = pMacData->pData;
-  unsigned int uqos = 0;
+  unsigned int uiQos = 0;
   struct sk_buff *pSkb = NULL;
   KLEM_TAP_HEADER sTapHdr;
-  unsigned long ctime;
+  unsigned long uCtime;
   unsigned long uSigFlags;
 
   set_user_nice(current, -20);
 
-  ctime = jiffies + pMacData->uBeacons;
+  uCtime = jiffies + pMacData->uBeacons;
   while ((false == kthread_should_stop()) &&
          (false != pMacData->bActive)) {
 
     /* Wait until we have something to do. */
     wait_event_interruptible_timeout(pMacData->sListWait,
-                                     ((uqos = privQueuePoll(pMacData)) < KLEM_MAX_QOS),
+                                     ((uiQos = privQueuePoll(pMacData)) < KLEM_MAX_QOS),
                                      pMacData->uBeacons);
 
     if (true == pMacData->bActive) {
       if (false == pMacData->bIdle) {
         if (true == pMacData->bRadioActive) {
-          if (time_before(jiffies, ctime)) {
-            if (uqos < KLEM_MAX_QOS) {
+          if (time_before(jiffies, uCtime)) {
+            if (uiQos < KLEM_MAX_QOS) {
               /* remove a packet from the list. */
               spin_lock_irqsave(&pMacData->sSpinLock, uSigFlags);
 
               /* We have the qos position from the privQueuePoll above. */
-              pSkb = skb_dequeue(&pMacData->qos [uqos].listSkb);
+              pSkb = skb_dequeue(&pMacData->qos [uiQos].listSkb);
 
               /* We should always have a packet here, but check anyways. */
               if (NULL != pSkb) {
-                pMacData->qos [uqos].uListDepth--;
-                if (pMacData->qos [uqos].bListActive == false) {
-                  if (pMacData->qos [uqos].uListDepth <= KLEM_QUEUE_LOW) {
-                    ieee80211_wake_queue(pMacData->pHW, uqos);
-                    pMacData->qos [uqos].bListActive = true;
+                pMacData->qos [uiQos].uiListDepth--;
+                if (pMacData->qos [uiQos].bListActive == false) {
+                  if (pMacData->qos [uiQos].uiListDepth <= KLEM_QUEUE_LOW) {
+                    ieee80211_wake_queue(pMacData->pHW, uiQos);
+                    pMacData->qos [uiQos].bListActive = true;
                   }
                 }
               }
 
-              if (uqos < KLEM_QUEUE_LOW) {
-                pMacData->qos [uqos].uSendNumber++;
+              if (uiQos < KLEM_QUEUE_LOW) {
+                pMacData->qos [uiQos].uSendNumber++;
               }
 
               /* Done removing the packet, release this portion of data */
@@ -1029,17 +1029,17 @@ static int privSendRawThread(void *pPtr)
                   sTapHdr.uFrequency =
                     htonl((u32)pMacData->pHW->conf.chandef.chan->center_freq);
                   sTapHdr.uPower = htonl((u32)pMacData->pHW->conf.power_level);
-                  sTapHdr.uId = htonl((u32)pData->uDeviceId);
+                  sTapHdr.uId = htonl((u32)pData->uiDeviceId);
 
                   /*
                    * Transmit that packet,
                    * and encapulate a mactap header.
                    */
-                  klemTransmit(pData->pRawSocket, pSkb,
+                  klemNetTransmit(pData->pRawSocket, pSkb,
                                (char *)&sTapHdr, sizeof(KLEM_TAP_HEADER));
                 } else {
                   KLEM_MSG("bridge send \n");
-                  klemTransmit(pData->pRawSocket, pSkb, NULL, 0);
+                  klemNetTransmit(pData->pRawSocket, pSkb, NULL, 0);
                 }
 
                 /* Indicate a success transmission */
@@ -1051,7 +1051,7 @@ static int privSendRawThread(void *pPtr)
 						       IEEE80211_IFACE_ITER_NORMAL,
                                                        privBeaconTX,
                                                        pMacData->pHW);
-            ctime = jiffies + pMacData->uBeacons;
+            uCtime = jiffies + pMacData->uBeacons;
             pMacData->uBeaconCount++;
           }
         }
@@ -1060,11 +1060,11 @@ static int privSendRawThread(void *pPtr)
   }
 
   /* Clean up any packets the might here. */
-  for (uqos = 0; uqos < KLEM_MAX_QOS; uqos++) {
-    pSkb = skb_dequeue(&pMacData->qos [uqos].listSkb);
+  for (uiQos = 0; uiQos < KLEM_MAX_QOS; uiQos++) {
+    pSkb = skb_dequeue(&pMacData->qos [uiQos].listSkb);
     while (NULL != pSkb) {
       ieee80211_free_txskb(pMacData->pHW, pSkb);
-      pSkb = skb_dequeue(&pMacData->qos [uqos].listSkb);
+      pSkb = skb_dequeue(&pMacData->qos [uiQos].listSkb);
     }
   }
 
@@ -1085,8 +1085,8 @@ void klem80211Recv(void *pPtr, struct sk_buff *pSkb)
   KLEM_TAP_HEADER *pTapHdr = (KLEM_TAP_HEADER *)pSkb->data;
   struct ieee80211_rx_status recvStat;
   struct ieee80211_hdr *pWHdr = NULL;
-  unsigned int uqos = 0;
-  unsigned int utmp;
+  unsigned int uiQos = 0;
+  unsigned int uiTmp;
   struct sk_buff *pTmpSkb = pSkb;
   bool bRecvFlag = false;
 
@@ -1111,9 +1111,9 @@ void klem80211Recv(void *pPtr, struct sk_buff *pSkb)
         pWHdr = (struct ieee80211_hdr *)skb_pull(pTmpSkb,
                                                  sizeof(KLEM_TAP_HEADER));
 
-        utmp = ntohl(pTapHdr->uId);
-        if (utmp < MAX_WIRELESS_NODE) {
-          if (false == pData->bFilterNode [utmp]) {
+        uiTmp = ntohl(pTapHdr->uId);
+        if (uiTmp < MAX_WIRELESS_NODE) {
+          if (false == pData->bFilterNode [uiTmp]) {
             memcpy(IEEE80211_SKB_RXCB(pTmpSkb), &recvStat, sizeof(recvStat));
             bRecvFlag = true;
           }
@@ -1141,27 +1141,27 @@ void klem80211Recv(void *pPtr, struct sk_buff *pSkb)
             {
             case 6:
             case 7:
-              uqos = 0;
+              uiQos = 0;
               break;
             case 4:
             case 5:
-              uqos = 1;
+              uiQos = 1;
               break;
             case 0:
             case 3:
-              uqos = 2;
+              uiQos = 2;
               break;
             case 1:
             case 2:
-              uqos = 3;
+              uiQos = 3;
               break;
             default:
-              uqos = 0;
+              uiQos = 0;
               break;
             }
         }
 
-        pMacData->qos [uqos].uRecvNumber++;
+        pMacData->qos [uiQos].uRecvNumber++;
         ieee80211_rx_irqsafe(pMacData->pHW, pTmpSkb);
         pTmpSkb = NULL;
         bRecvFlag = false;
@@ -1185,7 +1185,7 @@ void klem80211Proc(void *pPtr, struct seq_file *pOutput)
 {
   KLEMData *pData = (KLEMData *)pPtr;
   mac80211Data *pMacData = NULL;
-  int loop;
+  int iLoop;
 
   if (NULL != pData) {
     pMacData = (mac80211Data *)pData->pMacData;
@@ -1196,23 +1196,23 @@ void klem80211Proc(void *pPtr, struct seq_file *pOutput)
         seq_printf(pOutput, "beacon count :         %ld\n",
 		   pMacData->uBeaconCount);
 
-        for (loop = 0; loop < KLEM_MAX_QOS; loop++) {
-          seq_printf(pOutput, "qos [%d] aifs:         %d\n", loop,
-		     pMacData->qos [loop].aifs);
-          seq_printf(pOutput, "qos [%d] cw_min:       %d\n", loop,
-		     pMacData->qos [loop].cw_min);
-          seq_printf(pOutput, "qos [%d] cw_max:       %d\n", loop,
-		     pMacData->qos [loop].cw_max);
-          seq_printf(pOutput, "qos [%d] txop:         %d\n", loop,
-		     pMacData->qos [loop].txop);
-          seq_printf(pOutput, "qos [%d] recv:         %ld\n", loop,
-		     pMacData->qos [loop].uRecvNumber);
-          seq_printf(pOutput, "qos [%d] sent:         %ld\n", loop,
-		     pMacData->qos [loop].uSendNumber);
-          seq_printf(pOutput, "qos [%d] sent error:   %ld\n", loop,
-		     pMacData->qos [loop].uSendErrorNumber);
-          seq_printf(pOutput, "qos [%d] sent drop:    %ld\n", loop,
-		     pMacData->qos [loop].uSendDroppedNumber);
+        for (iLoop = 0; iLoop < KLEM_MAX_QOS; iLoop++) {
+          seq_printf(pOutput, "qos [%d] aifs:         %d\n", iLoop,
+		     pMacData->qos [iLoop].uAifs);
+          seq_printf(pOutput, "qos [%d] cw_min:       %d\n", iLoop,
+		     pMacData->qos [iLoop].uCwMin);
+          seq_printf(pOutput, "qos [%d] cw_max:       %d\n", iLoop,
+		     pMacData->qos [iLoop].uCwMax);
+          seq_printf(pOutput, "qos [%d] txop:         %d\n", iLoop,
+		     pMacData->qos [iLoop].uTxop);
+          seq_printf(pOutput, "qos [%d] recv:         %ld\n", iLoop,
+		     pMacData->qos [iLoop].uRecvNumber);
+          seq_printf(pOutput, "qos [%d] sent:         %ld\n", iLoop,
+		     pMacData->qos [iLoop].uSendNumber);
+          seq_printf(pOutput, "qos [%d] sent error:   %ld\n", iLoop,
+		     pMacData->qos [iLoop].uSendErrorNumber);
+          seq_printf(pOutput, "qos [%d] sent drop:    %ld\n", iLoop,
+		     pMacData->qos [iLoop].uSendDroppedNumber);
         }
       }
     }
@@ -1225,8 +1225,8 @@ void klem80211Start(void *pPtr)
   mac80211Data *pMacData = NULL;
   struct ieee80211_hw *pHW = NULL;
   struct task_struct *pSendTask = NULL;
-  int loop;
-  int err;
+  int iLoop;
+  int iErr;
 
   KLEM_MSG("Start the mac802.11 Simulator\n");
   if ((NULL != pData) && (NULL != pData->pMacData)) {
@@ -1235,7 +1235,7 @@ void klem80211Start(void *pPtr)
   }
 
   if (NULL != pData) {
-    pHW = ieee80211_alloc_hw(sizeof(mac80211Data), &privKlem80211OPS);
+    pHW = ieee80211_alloc_hw(sizeof(mac80211Data), &privConstKlem80211OPS);
     if (NULL == pHW) {
       KLEM_MSG("Failed to allocate ieee80211_alloc_hw\n");
       return;
@@ -1249,7 +1249,7 @@ void klem80211Start(void *pPtr)
     /* save the pointer to the mac radio in the general structure. */
     pData->pMacData = (void *)pMacData;
 
-    snprintf(pMacData->devName, sizeof(pMacData->devName), "klemMac80211");
+    snprintf(pMacData->pDevName, sizeof(pMacData->pDevName), "klemMac80211");
 
     /* This is a GPL exported only function. */
     pMacData->pDev = device_create(pData->pClass,
@@ -1257,7 +1257,7 @@ void klem80211Start(void *pPtr)
                                    0,
                                    pMacData->pHW,
                                    "%s",
-                                   pMacData->devName);
+                                   pMacData->pDevName);
 
     if (IS_ERR(pMacData->pDev)) {
       KLEM_MSG("Failed to get create a wireless device\n");
@@ -1276,24 +1276,24 @@ void klem80211Start(void *pPtr)
     init_waitqueue_head(&pMacData->sListWait);
     pMacData->uBeaconCount = 0;
 
-    for (loop = 0; loop < KLEM_MAX_QOS; loop++) {
-      pMacData->qos [loop].aifs = 0;
-      pMacData->qos [loop].cw_min = 0;
-      pMacData->qos [loop].cw_max = 0;
-      pMacData->qos [loop].txop = 0;
-      pMacData->qos [loop].uRecvNumber = 0;
-      pMacData->qos [loop].uSendNumber = 0;
-      pMacData->qos [loop].uSendErrorNumber = 0;
-      pMacData->qos [loop].uSendDroppedNumber = 0;
-      pMacData->qos [loop].uListDepth = 0;
+    for (iLoop = 0; iLoop < KLEM_MAX_QOS; iLoop++) {
+      pMacData->qos [iLoop].uAifs = 0;
+      pMacData->qos [iLoop].uCwMin = 0;
+      pMacData->qos [iLoop].uCwMax = 0;
+      pMacData->qos [iLoop].uTxop = 0;
+      pMacData->qos [iLoop].uRecvNumber = 0;
+      pMacData->qos [iLoop].uSendNumber = 0;
+      pMacData->qos [iLoop].uSendErrorNumber = 0;
+      pMacData->qos [iLoop].uSendDroppedNumber = 0;
+      pMacData->qos [iLoop].uiListDepth = 0;
 
       /* We need to create a skb buffer queue */
-      skb_queue_head_init(&pMacData->qos [loop].listSkb);
-      pMacData->qos [loop].bListActive = true;
+      skb_queue_head_init(&pMacData->qos [iLoop].listSkb);
+      pMacData->qos [iLoop].bListActive = true;
     }
 
     /* Specify the supported driver name. */
-    pMacData->pDev->driver = &klem80211Driver;
+    pMacData->pDev->driver = &localDriver;
     SET_IEEE80211_DEV(pMacData->pHW, pMacData->pDev);
 
     /* Setup hardware data */
@@ -1369,9 +1369,9 @@ void klem80211Start(void *pPtr)
     pMacData->band_5g.ht_cap.mcs.tx_params = IEEE80211_HT_MCS_TX_DEFINED;
     pMacData->pHW->wiphy->bands[NL80211_BAND_5GHZ] = &pMacData->band_5g;
 
-    err = ieee80211_register_hw(pMacData->pHW);
-    if (err < 0) {
-      KLEM_LOG("Failed to get register a wireless device (%d)\n", err);
+    iErr = ieee80211_register_hw(pMacData->pHW);
+    if (iErr < 0) {
+      KLEM_LOG("Failed to get register a wireless device (%d)\n", iErr);
       device_unregister(pMacData->pDev);
       ieee80211_free_hw(pMacData->pHW);
       pData->pMacData = NULL;

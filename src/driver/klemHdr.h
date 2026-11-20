@@ -11,15 +11,15 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-#ifndef KLEM_PROTOCOL_HDR
-#define KLEM_PROTOCOL_HDR
+#ifndef KLEM_HDR_INCLUDE
+#define KLEM_HDR_INCLUDE
 
 #include <linux/if_ether.h>
 
 #define KLEM_INT_VERSION 1
 #define KLEM_STR_VERSION "1"
 #define KLEM_NAME "klem"
-#define KELM_CONTROL "klemControl"
+#define KLEM_CONTROL "klemControl"
 #define KLEM_PROTOCOL 0xdead
 
 typedef struct KLEM_RAW_HEADER_DEF {
@@ -30,7 +30,7 @@ typedef struct KLEM_RAW_HEADER_DEF {
   u32 uVersion;
 } __attribute__((packed)) KLEM_RAW_HEADER;
 
-typedef struct KELM_DATA_HDR_DEF {
+typedef struct KLEM_TAP_HEADER_DEF {
   u32 uBand;
   u32 uFrequency;
   u32 uPower;
