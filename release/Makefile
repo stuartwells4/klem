@@ -5,7 +5,7 @@
 #
 # Author: Stuart Wells
 #
-# (C) Copyright 2016 Stuart Wells
+# (C) Copyright 2016 - 2026 Stuart Wells
 #
 #
 

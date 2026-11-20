@@ -1,19 +1,18 @@
 /*
  * Wireless Kernel Link Emulator
  *
- * Copyright (C) 2013 Stuart Wells <swells@stuartwells.net>
- * All rights reserved.
+ * Copyright (C) 2013 - 2026 Stuart Wells <swells@stuartwells.net>
  *
- * Licensed under the GNU General Public License, version 2 (GPLv2)
+ * Licensed under the GNU Lesser General Public License, version 2.1 (LGPLv2.1)
  *
  * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
+ * modify it under the terms of the GNU Lesser General Public License
+ * version 2.1 as published by the Free Software Foundation.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
  *
  */
 #ifndef KLEM_NET_INCLUDE
