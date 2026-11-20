@@ -87,9 +87,9 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
       seq_printf(pOutput, "device-id:            %d\n", pData->uiDeviceId);
 
       if (LEMU == pData->eMode) {
-	seq_printf(pOutput, "device-id:            lemu\n");
+	seq_printf(pOutput, "mode:                 lemu\n");
       } else {
-	seq_printf(pOutput, "device-id:            bridge\n");
+	seq_printf(pOutput, "mode:                 bridge\n");
       }
 
       iFilterNum = 0;
@@ -115,6 +115,14 @@ static int privProcOutputSeq(struct seq_file *pOutput, void *pBuffer)
   return 0;
 }
 
+/* True only if the run pWord [0..uiLen) is exactly pKeyword, not a prefix. */
+static bool privProcMatch(const char *pWord, unsigned int uiLen,
+                          const char *pKeyword)
+{
+  return ((strlen(pKeyword) == uiLen) &&
+          (0 == strncmp(pWord, pKeyword, uiLen)));
+}
+
 /*
  * Interface to recv information from the proc file system.
  * A way to use script files to configure experiments without
@@ -136,13 +144,21 @@ static int privProcInput(struct file *pFile,
   bool bParse = false;
   unsigned int uiLoop = 0;
   unsigned int uiTmp;
+  char cByte;
 
   mutex_lock(&pData->sLock);
 
   /* Look for command = values, and act upon it. */
   uiLoop = 0;
-  while (uiLoop < uCount) {
-    switch(pUserBuf [uiLoop])
+  while (uiLoop <= uCount) {
+    /* Treat the end of the buffer as a newline so the last pair is parsed. */
+    if (uiLoop < uCount) {
+      cByte = pUserBuf [uiLoop];
+    } else {
+      cByte = '\n';
+    }
+
+    switch(cByte)
       {
       case ' ':
       case '\r':
@@ -180,18 +196,18 @@ static int privProcInput(struct file *pFile,
     /* Should parsing those command = values */
     if ((NULL != pCommand) && (NULL != pValue) && (true == bParse)) {
       /* Do we have a command */
-      if (strncmp(pCommand, COMMAND_STR, uiCommandLen) == 0) {
-        if (strncmp(pValue, COMMAND_START_STR, uiValueLen) == 0) {
+      if (privProcMatch(pCommand, uiCommandLen, COMMAND_STR)) {
+        if (privProcMatch(pValue, uiValueLen, COMMAND_START_STR)) {
           klemCtrlStart(pData);
-        } else if (strncmp(pValue, COMMAND_STOP_STR, uiValueLen) == 0) {
+        } else if (privProcMatch(pValue, uiValueLen, COMMAND_STOP_STR)) {
           klemCtrlStop(pData);
         }
-      } else if (strncmp(pCommand, DEVICE_STR, uiCommandLen) == 0) {
+      } else if (privProcMatch(pCommand, uiCommandLen, DEVICE_STR)) {
         if (uiValueLen < sizeof(pData->pDevName)) {
           memset(pData->pDevName, 0, sizeof(pData->pDevName));
           strncpy(pData->pDevName, pValue, uiValueLen);
         }
-      } else if (strncmp(pCommand, ID_STR, uiCommandLen) == 0) {
+      } else if (privProcMatch(pCommand, uiCommandLen, ID_STR)) {
         uiTmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
         if (uiTmp >= MAX_WIRELESS_NODE) {
           pData->uiDeviceId = 0;
@@ -200,7 +216,7 @@ static int privProcInput(struct file *pFile,
         } else {
           pData->uiDeviceId = uiTmp;
         }
-      } else if (strncmp(pCommand, FILTER_STR, uiCommandLen) == 0) {
+      } else if (privProcMatch(pCommand, uiCommandLen, FILTER_STR)) {
         uiTmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
         if (uiTmp >= MAX_WIRELESS_NODE) {
           KLEM_LOG("Error, filter id %s must be beteen 0-255\n",
@@ -208,7 +224,7 @@ static int privProcInput(struct file *pFile,
         } else {
           pData->bFilterNode [uiTmp] = true;
         }
-      } else if (strncmp(pCommand, ACCEPT_STR, uiCommandLen) == 0) {
+      } else if (privProcMatch(pCommand, uiCommandLen, ACCEPT_STR)) {
         uiTmp = (unsigned int)simple_strtoul(pValue, NULL, 10);
         if (uiTmp >= MAX_WIRELESS_NODE) {
           KLEM_LOG("Error, accept id %s must be beteen 0-255\n",
@@ -216,10 +232,10 @@ static int privProcInput(struct file *pFile,
         } else {
           pData->bFilterNode [uiTmp] = false;
         }
-      } else if (strncmp(pCommand, MODE_STR, uiCommandLen) == 0) {
-        if (strncmp(pValue, MODE_LEMU_STR, uiValueLen) == 0) {
+      } else if (privProcMatch(pCommand, uiCommandLen, MODE_STR)) {
+        if (privProcMatch(pValue, uiValueLen, MODE_LEMU_STR)) {
           pData->eMode = LEMU;
-        } else if (strncmp(pValue, MODE_BRIDGE_STR, uiValueLen) == 0) {
+        } else if (privProcMatch(pValue, uiValueLen, MODE_BRIDGE_STR)) {
           pData->eMode = BRIDGE;
         }
       }
@@ -227,7 +243,7 @@ static int privProcInput(struct file *pFile,
       pValue = NULL;
       uiCommandLen = 0;
       uiValueLen = 0;
-      bCommand = false;
+      bCommand = true;
       bParse = false;
     }
 

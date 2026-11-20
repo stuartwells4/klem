@@ -22,6 +22,13 @@
 #define KLEM_CONTROL "klemControl"
 #define KLEM_PROTOCOL 0xdead
 
+/*
+ * Magic in KLEM_RAW_HEADER.uHeader, sent with htonl.  The value is
+ * "klem" read as a little-endian u32, which is what older x86 builds
+ * put on the wire, so they still interoperate.
+ */
+#define KLEM_HEADER_MAGIC 0x6d656c6bU
+
 typedef struct KLEM_RAW_HEADER_DEF {
   u8 pDstMac [ETH_ALEN];
   u8 pSrcMac [ETH_ALEN];

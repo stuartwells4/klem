@@ -28,5 +28,6 @@ void klem80211Proc(void *pPtr, struct seq_file *pOutput);
 
 void klem80211Recv(void *pPtr, struct sk_buff *pSkb);
 void klem80211Start(void *pPtr);
+void klem80211StopSend(void *pPtr);
 void klem80211Stop(void *pPtr);
 #endif

@@ -68,10 +68,6 @@ typedef struct raw_socket_def {
   /* Information to keep track of the sending / recieving threads */
   char pRecvName [64];
   void *pRecvThread;
-  union {
-    char pStr [4];
-    u32 uValue;
-  } hdr;
   u32 uVersion;
 } raw_socket;
 
@@ -89,14 +85,18 @@ static void privRecvReady(struct sock *pSocket)
   }
 }
 
+static void privDestroyRaw(void *pPtr);
+
 /*
- * Create a raw connection on a network device
+ * Create a raw connection on a network device, receiving only
+ * uBindProtocol frames (host byte order) from that device.
  */
-static void *privCreateRaw(char *pDevLabel)
+static void *privCreateRaw(char *pDevLabel, u16 uBindProtocol)
 {
   raw_socket *pRaw = NULL;
   int iRvalue;
   struct net_device *pDev = NULL;
+  struct sockaddr_ll llAddr;
 
   if (NULL != pDevLabel) {
     /* Find the device were will transmit the raw packet. */
@@ -115,11 +115,15 @@ static void *privCreateRaw(char *pDevLabel)
       memcpy(pRaw->pDevMac, pDev->dev_addr, ETH_ALEN);
       pRaw->iIfIndex = pDev->ifindex;
 
-      /* Create our socket (kernel socket in the initial namespace) */
+      /*
+       * Create our socket (kernel socket in the initial namespace).
+       * Protocol 0 receives nothing until the bind below, so frames
+       * from other interfaces never reach us.
+       */
       iRvalue = sock_create_kern(&init_net,
                                 PF_PACKET,
                                 SOCK_RAW,
-                                htons(ETH_P_ALL),
+                                0,
                                 &pRaw->pSocket);
 
       if ((iRvalue >= 0) && (NULL != pRaw->pSocket)) {
@@ -138,9 +142,6 @@ static void *privCreateRaw(char *pDevLabel)
 
         /* We need a semaphore. */
         sema_init(&pRaw->sSendWait, 1);
-
-        /* Copy the header information */
-        memcpy(pRaw->hdr.pStr, KLEM_NAME, 4);
 
         /* Set the protocol type */
         pRaw->uProtocol = KLEM_PROTOCOL;
@@ -168,6 +169,20 @@ static void *privCreateRaw(char *pDevLabel)
 
         /* Resume any callbacks */
         write_unlock_bh(&pRaw->pSocket->sk->sk_callback_lock);
+
+        /* Only receive from the configured device. */
+        memset(&llAddr, 0, sizeof(llAddr));
+        llAddr.sll_family = AF_PACKET;
+        llAddr.sll_protocol = htons(uBindProtocol);
+        llAddr.sll_ifindex = pRaw->iIfIndex;
+        iRvalue = kernel_bind(pRaw->pSocket,
+                              (struct sockaddr *)&llAddr,
+                              sizeof(llAddr));
+        if (iRvalue < 0) {
+          KLEM_LOG("Error binding socket %s %d\n", pDevLabel, iRvalue);
+          privDestroyRaw(pRaw);
+          pRaw = NULL;
+        }
       } else {
         KLEM_LOG("Error creating socket %s %d\n", pDevLabel, iRvalue);
         kfree(pRaw);
@@ -323,7 +338,7 @@ static int privRecvRawThread(void *pPtr)
             pHdr = (KLEM_RAW_HEADER *)pSkb->data;
 
             if (pRaw->uProtocol == ntohs(pHdr->uProtocol)) {
-              if (pRaw->hdr.uValue == ntohl(pHdr->uHeader)) {
+              if (KLEM_HEADER_MAGIC == ntohl(pHdr->uHeader)) {
                 if (pRaw->uVersion == ntohl(pHdr->uVersion)) {
 
                   /* remove the header */
@@ -373,7 +388,16 @@ void *klemNetConnect(void *pPtr, char *pDevLabel)
   struct task_struct *pTask = NULL;
 
   KLEM_LOG("Create Raw Socket %s\n", pDevLabel);
-  pRaw = privCreateRaw(pDevLabel);
+  /*
+   * LEMU only needs KLEM frames; bridge mode needs everything on the
+   * device.  The mode is read once here, so changing it needs a
+   * stop/start to take effect on the receive side.
+   */
+  if (LEMU == pData->eMode) {
+    pRaw = privCreateRaw(pDevLabel, KLEM_PROTOCOL);
+  } else {
+    pRaw = privCreateRaw(pDevLabel, ETH_P_ALL);
+  }
 
   if (NULL != pRaw) {
     snprintf(pRaw->pRecvName, sizeof(pRaw->pRecvName),
@@ -450,7 +474,7 @@ unsigned int klemNetTransmit(void *pPtr,
 
         /* Setup the raw ethernet header */
         khdr.uProtocol = htons(pRaw->uProtocol);
-        khdr.uHeader = htonl(pRaw->hdr.uValue);
+        khdr.uHeader = htonl(KLEM_HEADER_MAGIC);
         khdr.uVersion = htonl(pRaw->uVersion);
 
         /* Point to the ethernet header + klem datagram stuff */
