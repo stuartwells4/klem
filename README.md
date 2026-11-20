@@ -9,6 +9,13 @@ KLEM is a virtual wireless 802.11 network driver that connects devices together 
 
 The Linux kernel since version 2.6.32 has a SoftMAC 802.11 framework known as mac80211 that allows wireless frame management to be done completely in software.  The KLEM device driver uses this framework and wraps the generated 802.11 frames in raw Ethernet packets and broadcasts them over a wired network.   Each virtual or physical machine connected to the wired network that receives the raw KLEM packet can strip out the wireless packet and process it as if that packet was received from an actual radio.
 
+KLEM versus mac80211_hwsim
+--------------------------
+
+To simulate a wireless network on a single machine, use the kernel's built-in mac80211_hwsim driver instead.  It creates any number of virtual radios in one kernel and passes frames between them internally, and each radio can be moved into its own container or network namespace.
+
+KLEM is for emulating a wireless network across multiple hosts.  It provides one virtual radio per kernel and carries the 802.11 frames between physical or virtual machines over a wired Ethernet network.  Containers on the same host share one kernel, so they cannot be separate KLEM nodes.
+
 The KLEM driver wraps each wireless 802.11 frame with the following specialized raw Ethernet packet format:
 
      Length     Description             Value
