@@ -72,13 +72,19 @@ static void privCtrlProcess(struct work_struct *pPtr)
         klem80211Start(pData);
         break;
       case CONNECTION_STOP:
-        klem80211Stop(pData);
+        /*
+         * The send thread uses the raw socket and the recv thread
+         * uses the radio, so stop sending, then disconnect (which
+         * stops recv), and only then free the radio.
+         */
+        klem80211StopSend(pData);
         if (NULL != pData->pRawSocket) {
           klemNetDisconnect(pData->pRawSocket);
           pData->pRawSocket = NULL;
         } else {
           KLEM_MSG(" Raw Socket never allocated.");
         }
+        klem80211Stop(pData);
         break;
       }
 
@@ -147,10 +153,14 @@ void klemCtrlDestroy(void *pPtr)
     pData->pCtrlQueue = NULL;
   }
 
-  /* Destroy the socket, if its still exists */
+  /*
+   * Same order as CONNECTION_STOP.  The radio is stopped even without a
+   * socket, since start brings it up whether or not a device was set.
+   */
+  klem80211StopSend(pData);
   if (NULL != pData->pRawSocket) {
-    klem80211Stop(pData);
     klemNetDisconnect(pData->pRawSocket);
     pData->pRawSocket = NULL;
   }
+  klem80211Stop(pData);
 }

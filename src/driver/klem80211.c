@@ -429,6 +429,9 @@ typedef struct {
   spinlock_t sSpinLock;
   wait_queue_head_t sListWait;
 
+  /* Beacons collected under RCU, sent afterwards by the send thread. */
+  struct sk_buff_head listBeacon;
+
 
   bool bRadioActive;
   bool bActive;
@@ -742,6 +745,17 @@ static inline void privCommonTX(struct ieee80211_hw *pHW, struct sk_buff *pSkb)
         if (uiQos < KLEM_MAX_QOS) {
           spin_lock_irqsave(&pMacData->sSpinLock, uSigFlags);
 
+          /*
+           * Checked under the lock: klem80211StopSend clears bActive
+           * under the same lock, so nothing is queued after the send
+           * thread has drained the queues for the last time.
+           */
+          if (false == pMacData->bActive) {
+            spin_unlock_irqrestore(&pMacData->sSpinLock, uSigFlags);
+            privCompleteTX(pMacData, pSkb, false);
+            return;
+          }
+
           if (pMacData->qos [uiQos].uiListDepth < KLEM_QUEUE_MAX) {
             skb_queue_tail(&pMacData->qos [uiQos].listSkb,
                            pSkb);
@@ -897,15 +911,17 @@ static int privQueuePoll(void *pPtr)
   return iRvalue;
 }
 
-/* Quick function to transmit a beacon */
+/*
+ * Collect a beacon for one interface.  mac80211 calls this under
+ * rcu_read_lock, and klemNetTransmit can sleep, so the beacon is only
+ * queued here and privBeaconSend transmits it afterwards.
+ */
 static void privBeaconTX(void *pPtr, u8 *pMac,
           struct ieee80211_vif *pVIF)
 {
   struct ieee80211_hw *pHW = (struct ieee80211_hw *)pPtr;
   mac80211Data *pMacData = (mac80211Data *)pHW->priv;
-  KLEMData *pData = (KLEMData *)pMacData->pData;
   struct sk_buff *pSkb = NULL;
-  KLEM_TAP_HEADER sTapHdr;
 
   /* is the mac 802.11 active? */
   if (true == pMacData->bActive) {
@@ -917,24 +933,38 @@ static void privBeaconTX(void *pPtr, u8 *pMac,
 #endif
 
       if (NULL != pSkb) {
-        if (LEMU == pData->eMode) {
-          /* Put in the information on band, frequency, etc */
-          sTapHdr.uBand = htonl((u32)pMacData->pHW->conf.chandef.chan->band);
-          sTapHdr.uFrequency =
-            htonl((u32)pMacData->pHW->conf.chandef.chan->center_freq);
-          sTapHdr.uPower = htonl((u32)pMacData->pHW->conf.power_level);
-          sTapHdr.uId = htonl((u32)pData->uiDeviceId);
-
-          klemNetTransmit(pData->pRawSocket, pSkb,
-                       (char *)&sTapHdr, sizeof(KLEM_TAP_HEADER));
-        } else {
-          klemNetTransmit(pData->pRawSocket, pSkb,
-                       NULL, 0);
-        }
-        pMacData->uBeaconCount++;
-        dev_kfree_skb(pSkb);
+        skb_queue_tail(&pMacData->listBeacon, pSkb);
       }
     }
+  }
+}
+
+/* Transmit the beacons collected by privBeaconTX. */
+static void privBeaconSend(mac80211Data *pMacData)
+{
+  KLEMData *pData = (KLEMData *)pMacData->pData;
+  struct sk_buff *pSkb = NULL;
+  KLEM_TAP_HEADER sTapHdr;
+
+  pSkb = skb_dequeue(&pMacData->listBeacon);
+  while (NULL != pSkb) {
+    if (LEMU == pData->eMode) {
+      /* Put in the information on band, frequency, etc */
+      sTapHdr.uBand = htonl((u32)pMacData->pHW->conf.chandef.chan->band);
+      sTapHdr.uFrequency =
+        htonl((u32)pMacData->pHW->conf.chandef.chan->center_freq);
+      sTapHdr.uPower = htonl((u32)pMacData->pHW->conf.power_level);
+      sTapHdr.uId = htonl((u32)pData->uiDeviceId);
+
+      klemNetTransmit(pData->pRawSocket, pSkb,
+                      (char *)&sTapHdr, sizeof(KLEM_TAP_HEADER));
+    } else {
+      klemNetTransmit(pData->pRawSocket, pSkb,
+                      NULL, 0);
+    }
+    pMacData->uBeaconCount++;
+    dev_kfree_skb(pSkb);
+    pSkb = skb_dequeue(&pMacData->listBeacon);
   }
 }
 
@@ -966,6 +996,41 @@ static void privCompleteTX(void *pPtr, struct sk_buff *pSkb, bool bAck)
 }
 
 /*
+ * Drop every queued packet and reopen any stopped mac80211 queue.
+ * Used while the radio is idle or stopped, when nothing can be sent.
+ */
+static void privQueueDrop(mac80211Data *pMacData)
+{
+  struct sk_buff_head listDrop;
+  struct sk_buff *pSkb = NULL;
+  unsigned long uSigFlags;
+  unsigned int uiLoop;
+
+  __skb_queue_head_init(&listDrop);
+
+  spin_lock_irqsave(&pMacData->sSpinLock, uSigFlags);
+  for (uiLoop = 0; uiLoop < KLEM_MAX_QOS; uiLoop++) {
+    pMacData->qos [uiLoop].uSendDroppedNumber +=
+      skb_queue_len(&pMacData->qos [uiLoop].listSkb);
+    skb_queue_splice_tail_init(&pMacData->qos [uiLoop].listSkb, &listDrop);
+    pMacData->qos [uiLoop].uiListDepth = 0;
+
+    /* Otherwise a stopped queue never wakes, since nothing drains it. */
+    if (false == pMacData->qos [uiLoop].bListActive) {
+      ieee80211_wake_queue(pMacData->pHW, uiLoop);
+      pMacData->qos [uiLoop].bListActive = true;
+    }
+  }
+  spin_unlock_irqrestore(&pMacData->sSpinLock, uSigFlags);
+
+  pSkb = __skb_dequeue(&listDrop);
+  while (NULL != pSkb) {
+    privCompleteTX(pMacData, pSkb, false);
+    pSkb = __skb_dequeue(&listDrop);
+  }
+}
+
+/*
  * Take any queued packet and transmit it.
  *
  * Future: Needs better abstraction of extracting qos packets to emulate
@@ -979,6 +1044,7 @@ static int privSendRawThread(void *pPtr)
   unsigned int uiQos = 0;
   struct sk_buff *pSkb = NULL;
   KLEM_TAP_HEADER sTapHdr;
+  unsigned int uiSent = 0;
   unsigned long uCtime;
   unsigned long uSigFlags;
 
@@ -994,67 +1060,75 @@ static int privSendRawThread(void *pPtr)
                                      pMacData->uBeacons);
 
     if (true == pMacData->bActive) {
-      if (false == pMacData->bIdle) {
-        if (true == pMacData->bRadioActive) {
-          if (time_before(jiffies, uCtime)) {
-            if (uiQos < KLEM_MAX_QOS) {
-              /* remove a packet from the list. */
-              spin_lock_irqsave(&pMacData->sSpinLock, uSigFlags);
+      if ((true == pMacData->bIdle) || (false == pMacData->bRadioActive)) {
+        /*
+         * Nothing can be sent.  Queued packets would keep the wait
+         * above returning at once and this thread would spin, so drop them.
+         */
+        if (uiQos < KLEM_MAX_QOS) {
+          privQueueDrop(pMacData);
+        }
+      } else if (time_before(jiffies, uCtime)) {
+        if (uiQos < KLEM_MAX_QOS) {
+          /* remove a packet from the list. */
+          spin_lock_irqsave(&pMacData->sSpinLock, uSigFlags);
 
-              /* We have the qos position from the privQueuePoll above. */
-              pSkb = skb_dequeue(&pMacData->qos [uiQos].listSkb);
+          /* We have the qos position from the privQueuePoll above. */
+          pSkb = skb_dequeue(&pMacData->qos [uiQos].listSkb);
 
-              /* We should always have a packet here, but check anyways. */
-              if (NULL != pSkb) {
-                pMacData->qos [uiQos].uiListDepth--;
-                if (pMacData->qos [uiQos].bListActive == false) {
-                  if (pMacData->qos [uiQos].uiListDepth <= KLEM_QUEUE_LOW) {
-                    ieee80211_wake_queue(pMacData->pHW, uiQos);
-                    pMacData->qos [uiQos].bListActive = true;
-                  }
-                }
-              }
-
-              if (uiQos < KLEM_QUEUE_LOW) {
-                pMacData->qos [uiQos].uSendNumber++;
-              }
-
-              /* Done removing the packet, release this portion of data */
-              spin_unlock_irqrestore(&pMacData->sSpinLock, uSigFlags);
-
-              if (NULL != pSkb) {
-                if (LEMU == pData->eMode) {
-                  /* Put in the information on band, frequency, etc */
-                  sTapHdr.uBand = htonl((u32)pMacData->pHW->conf.chandef.chan->band);
-                  sTapHdr.uFrequency =
-                    htonl((u32)pMacData->pHW->conf.chandef.chan->center_freq);
-                  sTapHdr.uPower = htonl((u32)pMacData->pHW->conf.power_level);
-                  sTapHdr.uId = htonl((u32)pData->uiDeviceId);
-
-                  /*
-                   * Transmit that packet,
-                   * and encapulate a mactap header.
-                   */
-                  klemNetTransmit(pData->pRawSocket, pSkb,
-                               (char *)&sTapHdr, sizeof(KLEM_TAP_HEADER));
-                } else {
-                  KLEM_MSG("bridge send \n");
-                  klemNetTransmit(pData->pRawSocket, pSkb, NULL, 0);
-                }
-
-                /* Indicate a success transmission */
-                privCompleteTX(pMacData, pSkb, true);
+          /* We should always have a packet here, but check anyways. */
+          if (NULL != pSkb) {
+            pMacData->qos [uiQos].uiListDepth--;
+            if (pMacData->qos [uiQos].bListActive == false) {
+              if (pMacData->qos [uiQos].uiListDepth <= KLEM_QUEUE_LOW) {
+                ieee80211_wake_queue(pMacData->pHW, uiQos);
+                pMacData->qos [uiQos].bListActive = true;
               }
             }
-          } else {
-            ieee80211_iterate_active_interfaces_atomic(pMacData->pHW,
-						       IEEE80211_IFACE_ITER_NORMAL,
-                                                       privBeaconTX,
-                                                       pMacData->pHW);
-            uCtime = jiffies + pMacData->uBeacons;
-            pMacData->uBeaconCount++;
+          }
+
+          if (NULL != pSkb) {
+            pMacData->qos [uiQos].uSendNumber++;
+          }
+
+          /* Done removing the packet, release this portion of data */
+          spin_unlock_irqrestore(&pMacData->sSpinLock, uSigFlags);
+
+          if (NULL != pSkb) {
+            if (LEMU == pData->eMode) {
+              /* Put in the information on band, frequency, etc */
+              sTapHdr.uBand = htonl((u32)pMacData->pHW->conf.chandef.chan->band);
+              sTapHdr.uFrequency =
+                htonl((u32)pMacData->pHW->conf.chandef.chan->center_freq);
+              sTapHdr.uPower = htonl((u32)pMacData->pHW->conf.power_level);
+              sTapHdr.uId = htonl((u32)pData->uiDeviceId);
+
+              /*
+               * Transmit that packet,
+               * and encapulate a mactap header.
+               */
+              uiSent = klemNetTransmit(pData->pRawSocket, pSkb,
+                                       (char *)&sTapHdr,
+                                       sizeof(KLEM_TAP_HEADER));
+            } else {
+              KLEM_MSG("bridge send \n");
+              uiSent = klemNetTransmit(pData->pRawSocket, pSkb, NULL, 0);
+            }
+
+            /* Only report an ACK if the frame actually went out. */
+            if (0 == uiSent) {
+              pMacData->qos [uiQos].uSendErrorNumber++;
+            }
+            privCompleteTX(pMacData, pSkb, (0 != uiSent));
           }
         }
+      } else {
+        ieee80211_iterate_active_interfaces_atomic(pMacData->pHW,
+                                                   IEEE80211_IFACE_ITER_NORMAL,
+                                                   privBeaconTX,
+                                                   pMacData->pHW);
+        privBeaconSend(pMacData);
+        uCtime = jiffies + pMacData->uBeacons;
       }
     }
   }
@@ -1067,6 +1141,7 @@ static int privSendRawThread(void *pPtr)
       pSkb = skb_dequeue(&pMacData->qos [uiQos].listSkb);
     }
   }
+  skb_queue_purge(&pMacData->listBeacon);
 
   while ((false == kthread_should_stop())) {
     msleep(1000);
@@ -1095,6 +1170,16 @@ void klem80211Recv(void *pPtr, struct sk_buff *pSkb)
       if (LEMU == pData->eMode) {
         if (pTmpSkb->len < (sizeof(KLEM_TAP_HEADER) + 10)) {
           /* Too short to hold a tap header and an 802.11 header. */
+          kfree_skb(pTmpSkb);
+          return;
+        }
+
+        /*
+         * The band comes from the network.  mac80211 WARNs on a band
+         * the radio did not register, so only accept ours.
+         */
+        if ((NL80211_BAND_2GHZ != ntohl(pTapHdr->uBand)) &&
+            (NL80211_BAND_5GHZ != ntohl(pTapHdr->uBand))) {
           kfree_skb(pTmpSkb);
           return;
         }
@@ -1131,6 +1216,23 @@ void klem80211Recv(void *pPtr, struct sk_buff *pSkb)
         pWHdr = (struct ieee80211_hdr *)pTmpSkb->data;
         memcpy(IEEE80211_SKB_RXCB(pTmpSkb), &recvStat, sizeof(recvStat));
         bRecvFlag = true;
+      }
+
+      /*
+       * The whole 802.11 header, including any QoS control field read
+       * below, must be in the linear part of the frame.  pskb_may_pull
+       * can move the data, so reload pWHdr after each call.
+       */
+      if (true == bRecvFlag) {
+        bRecvFlag = false;
+        if (pskb_may_pull(pTmpSkb, sizeof(pWHdr->frame_control))) {
+          pWHdr = (struct ieee80211_hdr *)pTmpSkb->data;
+          if (pskb_may_pull(pTmpSkb,
+                            ieee80211_hdrlen(pWHdr->frame_control))) {
+            pWHdr = (struct ieee80211_hdr *)pTmpSkb->data;
+            bRecvFlag = true;
+          }
+        }
       }
 
       if (true == bRecvFlag) {
@@ -1274,6 +1376,7 @@ void klem80211Start(void *pPtr)
 
     spin_lock_init(&pMacData->sSpinLock);
     init_waitqueue_head(&pMacData->sListWait);
+    skb_queue_head_init(&pMacData->listBeacon);
     pMacData->uBeaconCount = 0;
 
     for (iLoop = 0; iLoop < KLEM_MAX_QOS; iLoop++) {
@@ -1392,6 +1495,36 @@ void klem80211Start(void *pPtr)
   }
 }
 
+/*
+ * Stop the send thread, which uses the raw socket.  Must be called
+ * before the raw socket is disconnected.
+ */
+void klem80211StopSend(void *pPtr)
+{
+  KLEMData *pData = (KLEMData *)pPtr;
+  mac80211Data *pMacData = NULL;
+  unsigned long uSigFlags;
+
+  if (NULL != pData) {
+    pMacData = (mac80211Data *)pData->pMacData;
+    if (NULL != pMacData) {
+      /* Under the lock, see privCommonTX. */
+      spin_lock_irqsave(&pMacData->sSpinLock, uSigFlags);
+      pMacData->bActive = false;
+      spin_unlock_irqrestore(&pMacData->sSpinLock, uSigFlags);
+
+      if (NULL != pMacData->pSendThread) {
+        kthread_stop((struct task_struct *)pMacData->pSendThread);
+        pMacData->pSendThread = NULL;
+      }
+    }
+  }
+}
+
+/*
+ * Unregister and free the radio.  The recv thread delivers packets to
+ * the radio, so the raw socket must be disconnected before this is called.
+ */
 void klem80211Stop(void *pPtr)
 {
   KLEMData *pData = (KLEMData *)pPtr;
@@ -1400,13 +1533,8 @@ void klem80211Stop(void *pPtr)
   if (NULL != pData) {
     pMacData = (mac80211Data *)pData->pMacData;
     if (NULL != pMacData) {
-      pMacData->bActive = false;
       pMacData->bRadioActive = false;
-
-      if (NULL != pMacData->pSendThread) {
-        kthread_stop((struct task_struct *)pMacData->pSendThread);
-        pMacData->pSendThread = NULL;
-      }
+      klem80211StopSend(pData);
 
       if (NULL != pMacData->pHW) {
         ieee80211_unregister_hw(pMacData->pHW);
