@@ -381,6 +381,30 @@ static const struct ieee80211_rate privConstBitRate_5g[] = {
   { .bitrate = 240, .flags = 0 },
 };
 
+/*
+ * Interface combinations.  Without these cfg80211 allows only one
+ * interface up at a time.  Allow one station and one access point
+ * together, as an AP/STA tree mesh node needs.  klem has no channel
+ * context support, so both must share one channel, as on brcmfmac.
+ */
+static const struct ieee80211_iface_limit privConstIfaceLimits[] = {
+  { .max = 1, .types = BIT(NL80211_IFTYPE_STATION) },
+  { .max = 1, .types = BIT(NL80211_IFTYPE_AP) },
+};
+
+static const struct ieee80211_iface_combination privConstIfaceCombos[] = {
+  {
+    .limits = privConstIfaceLimits,
+    .n_limits = ARRAY_SIZE(privConstIfaceLimits),
+    .max_interfaces = 2,
+    .num_different_channels = 1,
+    .beacon_int_infra_match = true,
+  },
+};
+
+/* One MAC address for each interface allowed by the combinations. */
+#define KLEM_MAC_ADDRESSES 2
+
 /* define a length for above tables */
 #define CHANNEL_SIZE_2G ARRAY_SIZE(privConstChannels_2ghz)
 #define CHANNEL_SIZE_5G ARRAY_SIZE(privConstChannels_5ghz)
@@ -410,7 +434,7 @@ typedef struct {
   unsigned long uBeacons;
   unsigned long uBeaconCount;
   char pDevName [64];
-  struct mac_address  macAddress;
+  struct mac_address  macAddress [KLEM_MAC_ADDRESSES];
 
   /* Structures for band, channel and rates for 2GHZ */
   struct ieee80211_supported_band band_2g;
@@ -1292,8 +1316,10 @@ void klem80211Proc(void *pPtr, struct seq_file *pOutput)
     pMacData = (mac80211Data *)pData->pMacData;
     if (NULL != pMacData) {
       if (NULL != pOutput) {
-        seq_printf(pOutput, "MAC Address:          %pM\n",
-		   (void *)&pMacData->macAddress);
+        for (iLoop = 0; iLoop < KLEM_MAC_ADDRESSES; iLoop++) {
+          seq_printf(pOutput, "MAC Address %d:        %pM\n", iLoop,
+                     (void *)&pMacData->macAddress [iLoop]);
+        }
         seq_printf(pOutput, "beacon count :         %ld\n",
 		   pMacData->uBeaconCount);
 
@@ -1400,11 +1426,26 @@ void klem80211Start(void *pPtr)
 
     /* Setup hardware data */
     pMacData->pHW->queues = KLEM_MAX_QOS;
-    pMacData->pHW->wiphy->n_addresses = 1;
+    pMacData->pHW->wiphy->n_addresses = KLEM_MAC_ADDRESSES;
 
-    /* Generate a mac address */
-    eth_random_addr((u8 *)&pMacData->macAddress);
-    pMacData->pHW->wiphy->addresses = &pMacData->macAddress;
+    /*
+     * Generate a random, locally administered mac address for the first
+     * interface.  Each further interface gets a copy with a different
+     * last byte, so a STA and AP never share an address (batman-adv
+     * needs a unique address on each hard interface).
+     */
+    eth_random_addr((u8 *)&pMacData->macAddress [0]);
+    for (iLoop = 1; iLoop < KLEM_MAC_ADDRESSES; iLoop++) {
+      memcpy(&pMacData->macAddress [iLoop], &pMacData->macAddress [0],
+             sizeof(struct mac_address));
+      pMacData->macAddress [iLoop].addr [ETH_ALEN - 1] ^= (u8)iLoop;
+    }
+    pMacData->pHW->wiphy->addresses = pMacData->macAddress;
+
+    /* Allow a STA and an AP interface up at the same time. */
+    pMacData->pHW->wiphy->iface_combinations = privConstIfaceCombos;
+    pMacData->pHW->wiphy->n_iface_combinations =
+      ARRAY_SIZE(privConstIfaceCombos);
 
     pMacData->pHW->wiphy->interface_modes = BIT(NL80211_IFTYPE_MESH_POINT) |
       BIT(NL80211_IFTYPE_ADHOC) |

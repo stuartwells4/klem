@@ -117,6 +117,28 @@ If Secure Boot is enabled, the kernel will refuse to load an unsigned klem.ko.
 Either sign the module with a key enrolled through mokutil, or disable Secure
 Boot validation.
 
+Raspberry Pi
+------------
+
+On Raspberry Pi OS, install the headers for the running kernel, then build as
+above:
+
+    #sudo apt install build-essential linux-headers-$(uname -r)
+
+mac80211 names the KLEM radio wlan0 only if no other wireless device exists.
+The onboard Wi-Fi normally takes wlan0, so disable it to give that name to
+KLEM.  Add this line to /boot/firmware/config.txt and reboot:
+
+    dtoverlay=disable-wifi
+
+Check the name with "iw dev" after starting KLEM.
+
+KLEM allows one station and one access point interface up at the same time,
+sharing one channel, as the onboard brcmfmac radio does.  Each interface gets
+its own MAC address, so both can be added to batman-adv:
+
+    #iw dev wlan0 interface add wlan1 type __ap
+
 
 
 
